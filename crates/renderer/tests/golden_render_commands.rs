@@ -15,7 +15,7 @@ use std::collections::HashMap;
 
 use kestrel_loom::core::{
     render_chart, update_indicator_panes, CandleGenerator, ChartState, GeneratorConfig,
-    IndicatorPane, PriceRange, RenderExtras, TimeRange, Timeframe, Viewport,
+    IndicatorPane, IndicatorPlacement, PriceRange, RenderExtras, TimeRange, Timeframe, Viewport,
 };
 use kestrel_loom::rendering::{cull_candles, DrawStyle};
 use kestrel_loom::tools::{ChartTool, HorizontalLine, ToolManager, ToolNode, TrendLine};
@@ -335,4 +335,114 @@ fn a_frame_with_an_indicator_pane_is_stable() {
 #[test]
 fn an_unknown_indicator_is_rejected() {
     assert!(IndicatorPane::new("pane-x", "gibtsnicht", HashMap::new(), 0.28).is_err());
+}
+
+/// Ein Overlay-Indikator gehört auf den Preischart, nicht in ein eigenes Pane —
+/// und er zeichnet alle seine Bänder, nicht nur die Mittellinie.
+#[test]
+fn bollinger_renders_as_an_overlay_with_its_bands() {
+    let mut generator = CandleGenerator::new(
+        GeneratorConfig::crypto()
+            .with_seed(42)
+            .with_timeframe(Timeframe::M5),
+    );
+
+    let mut state = ChartState::new(800, 400, Timeframe::M5);
+    state.set_candles(generator.generate(150));
+    state.fit_to_data();
+
+    let mut panes =
+        vec![IndicatorPane::new("pane-bollinger", "bollinger", HashMap::new(), 0.28).unwrap()];
+    update_indicator_panes(&mut panes, &state.candles);
+
+    assert_eq!(panes[0].placement(), IndicatorPlacement::Overlay);
+    assert_eq!(
+        panes[0].series.lines().count(),
+        4,
+        "Mittellinie, Basis, oberes und unteres Band"
+    );
+
+    let extras = RenderExtras {
+        indicator_panes: &panes,
+        ..Default::default()
+    };
+
+    let mut with_overlay = BatchRenderer::new(800, 400);
+    render_chart(&mut state, &extras, &mut with_overlay);
+
+    // Ohne Indikator: gleicher Frame, nur ohne die Overlay-Linien.
+    state.mark_dirty();
+    let mut without = BatchRenderer::new(800, 400);
+    render_chart(&mut state, &RenderExtras::default(), &mut without);
+
+    let count = |r: &BatchRenderer| {
+        r.commands()
+            .iter()
+            .filter(|c| matches!(c, RenderCommand::IndicatorLine { .. }))
+            .count()
+    };
+    assert_eq!(count(&without), 0);
+    assert_eq!(
+        count(&with_overlay),
+        4,
+        "vier Linien auf dem Preischart, kein eigenes Pane"
+    );
+
+    let actual = with_overlay
+        .commands()
+        .iter()
+        .map(format_command)
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert_golden("full_frame_with_bollinger_overlay", actual);
+}
+
+/// Ein Overlay darf dem Hauptchart keine Höhe wegnehmen, ein Pane schon.
+#[test]
+fn an_overlay_does_not_shrink_the_main_chart() {
+    let mut generator = CandleGenerator::new(GeneratorConfig::crypto().with_seed(42));
+    let candles = generator.generate(100);
+
+    // Unterster Punkt aller gezeichneten Kerzenkörper — er zeigt, wie viel Höhe
+    // dem Hauptchart geblieben ist.
+    let lowest_candle_y = |indicator: Option<&str>| {
+        let mut state = ChartState::new(800, 400, Timeframe::M5);
+        state.set_candles(candles.clone());
+        state.fit_to_data();
+        let mut panes = match indicator {
+            Some(name) => vec![IndicatorPane::new("p", name, HashMap::new(), 0.28).unwrap()],
+            None => Vec::new(),
+        };
+        update_indicator_panes(&mut panes, &state.candles);
+        let extras = RenderExtras {
+            indicator_panes: &panes,
+            ..Default::default()
+        };
+        let mut r = BatchRenderer::new(800, 400);
+        render_chart(&mut state, &extras, &mut r);
+        r.commands()
+            .iter()
+            .filter_map(|c| match c {
+                // Kerzenkörper, nicht die vollbreiten Flächen der Panes.
+                RenderCommand::Rect {
+                    y, height, width, ..
+                } if *width < 50.0 => Some(y + height),
+                _ => None,
+            })
+            .fold(f64::NEG_INFINITY, f64::max)
+    };
+
+    let plain = lowest_candle_y(None);
+    let overlay = lowest_candle_y(Some("bollinger"));
+    let pane = lowest_candle_y(Some("rsi"));
+
+    assert!(
+        (plain - overlay).abs() < 0.5,
+        "Overlay verändert die Höhe des Hauptcharts nicht ({plain} vs {overlay})"
+    );
+    assert!(
+        pane < plain,
+        "ein Pane verkleinert den Hauptchart ({pane} statt {plain})"
+    );
 }

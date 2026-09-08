@@ -7,7 +7,7 @@
 
 use std::collections::HashMap;
 
-use crate::core::indicators::IndicatorSeries;
+use crate::core::indicators::{IndicatorPlacement, IndicatorSeries};
 use crate::core::{Candle, ChartState, FootprintCandle};
 use crate::primitives::Color;
 use crate::rendering::Renderer;
@@ -32,6 +32,11 @@ pub struct IndicatorPane {
 }
 
 impl IndicatorPane {
+    /// Wohin dieser Indikator gezeichnet wird.
+    pub fn placement(&self) -> IndicatorPlacement {
+        self.series.placement()
+    }
+
     /// Legt ein Pane für einen Indikator aus dem Chartkit-Katalog an.
     pub fn new(
         pane_id: impl Into<String>,
@@ -338,6 +343,8 @@ pub fn render_chart(state: &mut ChartState, extras: &RenderExtras, renderer: &mu
         state.viewport.dimensions.width as f64,
         main_height,
     );
+    render_overlay_indicators(indicator_panes, state, renderer);
+
     render_compare_symbols(compare_symbols, state, renderer, main_height);
     renderer.clear_clip();
     render_indicator_panes(indicator_panes, state, renderer);
@@ -500,14 +507,53 @@ fn render_compare_symbols(
 }
 
 fn main_chart_height(indicator_panes: &[IndicatorPane], height: f64) -> f64 {
-    if indicator_panes.is_empty() {
-        return height;
-    }
+    // Overlays liegen auf dem Preischart und kosten keine eigene Höhe.
     let indicator_total: f64 = indicator_panes
         .iter()
+        .filter(|pane| pane.placement() == IndicatorPlacement::Pane)
         .map(|pane| pane.height_fraction)
         .sum();
+    if indicator_total <= 0.0 {
+        return height;
+    }
     height * (1.0 - indicator_total).max(0.38)
+}
+
+/// Farbe der n-ten Linie eines Indikators. Erste Linie kräftig, weitere gedämpft —
+/// Bänder sollen den Hauptwert nicht überschreien.
+fn line_color(index: usize) -> Color {
+    match index {
+        0 => Color::rgba(88, 166, 255, 0.95),
+        1 => Color::rgba(255, 166, 87, 0.85),
+        2 => Color::rgba(126, 231, 135, 0.85),
+        3 => Color::rgba(219, 109, 255, 0.8),
+        _ => Color::rgba(160, 180, 200, 0.7),
+    }
+}
+
+/// Zeichnet Indikatoren, deren Werte in Preiseinheiten liegen, auf den Preischart.
+fn render_overlay_indicators(
+    indicator_panes: &[IndicatorPane],
+    state: &ChartState,
+    renderer: &mut dyn Renderer,
+) {
+    let vp = &state.viewport;
+    for pane in indicator_panes
+        .iter()
+        .filter(|pane| pane.placement() == IndicatorPlacement::Overlay)
+    {
+        for (index, line) in pane.series.lines().enumerate() {
+            let points: Vec<(f64, f64)> = line
+                .points
+                .iter()
+                .filter(|(time, _)| *time >= vp.time.start && *time <= vp.time.end)
+                .map(|(time, value)| (vp.time_to_x(*time), vp.price_to_y(*value)))
+                .collect();
+            if points.len() >= 2 {
+                renderer.draw_polyline(&points, line_color(index), 1.4);
+            }
+        }
+    }
 }
 
 fn render_footprint_candles(
@@ -669,7 +715,10 @@ fn render_indicator_panes(
     let price_axis_w = 64.0;
     let content_w = width - price_axis_w;
 
-    for pane in indicator_panes {
+    for pane in indicator_panes
+        .iter()
+        .filter(|pane| pane.placement() == IndicatorPlacement::Pane)
+    {
         let pane_h = (height * pane.height_fraction).max(56.0);
 
         // Pane background: only the content area (not the price-axis column)
@@ -687,22 +736,30 @@ fn render_indicator_panes(
         // Separator between content and scale column
         renderer.draw_line(content_w, top, content_w, top + pane_h, border, 1.0);
 
-        let series = pane.series.values();
-        let visible: Vec<(i64, f64)> = series
-            .iter()
-            .copied()
-            .filter(|(time, value)| {
-                *time >= vp.time.start && *time <= vp.time.end && value.is_finite()
+        // Alle Linien des Indikators, auf eine gemeinsame Skala gebracht.
+        let lines: Vec<Vec<(i64, f64)>> = pane
+            .series
+            .lines()
+            .map(|line| {
+                line.points
+                    .iter()
+                    .copied()
+                    .filter(|(time, value)| {
+                        *time >= vp.time.start && *time <= vp.time.end && value.is_finite()
+                    })
+                    .collect()
             })
             .collect();
 
-        if visible.len() >= 2 {
-            let mut min_v = visible
+        if lines.first().map(|l| l.len()).unwrap_or(0) >= 2 {
+            let mut min_v = lines
                 .iter()
+                .flatten()
                 .map(|(_, v)| *v)
                 .fold(f64::INFINITY, f64::min);
-            let mut max_v = visible
+            let mut max_v = lines
                 .iter()
+                .flatten()
                 .map(|(_, v)| *v)
                 .fold(f64::NEG_INFINITY, f64::max);
             if matches!(pane.indicator_id.as_str(), "rsi" | "stochastic") {
@@ -717,15 +774,20 @@ fn render_indicator_panes(
             max_v += pad;
             let span = (max_v - min_v).max(1.0);
             let value_to_y = |value: f64| top + pane_h - ((value - min_v) / span) * pane_h;
-            let points: Vec<(f64, f64)> = visible
-                .iter()
-                .map(|(time, value)| (vp.time_to_x(*time), value_to_y(*value)))
-                .collect();
-            renderer.draw_polyline(
-                &points,
-                crate::primitives::Color::rgba(88, 166, 255, 0.95),
-                1.6,
-            );
+
+            for (index, line) in lines.iter().enumerate() {
+                let points: Vec<(f64, f64)> = line
+                    .iter()
+                    .map(|(time, value)| (vp.time_to_x(*time), value_to_y(*value)))
+                    .collect();
+                if points.len() >= 2 {
+                    renderer.draw_polyline(
+                        &points,
+                        line_color(index),
+                        if index == 0 { 1.6 } else { 1.2 },
+                    );
+                }
+            }
 
             // Scale labels in the price-axis column (right 64px)
             for i in 0..=2 {

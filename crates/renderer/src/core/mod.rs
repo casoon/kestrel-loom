@@ -40,7 +40,7 @@ pub use footprint::{FootprintCandle, FootprintConfig, FootprintLevel, FootprintR
 pub use generator::{
     CandleGenerator, GeneratorConfig, MarketType, Scenario, Trend, VolatilityRegime,
 };
-pub use indicators::IndicatorSeries;
+pub use indicators::{placement_for, IndicatorLine, IndicatorPlacement, IndicatorSeries};
 pub use invalidation::{
     InvalidationLevel, InvalidationLevels, InvalidationMask, LayeredInvalidation, RenderLayer,
 };

@@ -14,13 +14,110 @@ use kestrel_chartkit::{Bar, Indicator};
 
 use crate::core::Candle;
 
+/// Wohin ein Indikator gezeichnet wird.
+///
+/// `kestrel-chartkit` sagt das nicht: `IndicatorCatalogEntry` trägt nur Name,
+/// Beschreibung und Standardparameter. Entscheidend ist, ob die Ausgabe in
+/// **Preiseinheiten** liegt — dann gehört sie auf den Preischart, sonst in ein
+/// eigenes Pane mit eigener Skala. Das ist eine Eigenschaft des Indikators, keine
+/// Darstellungsvorliebe, und gehört langfristig in Chartkits Katalog
+/// (siehe `plan/02-chartkit-vertrag.md`). Bis dahin steht sie hier — explizit
+/// aufgeführt statt aus Wertebereichen geraten: ein RSI auf einem Instrument, das
+/// um 50 notiert, wäre von einer Heuristik nicht von einem Preis zu unterscheiden.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum IndicatorPlacement {
+    /// Ausgabe in Preiseinheiten — auf den Preischart.
+    Overlay,
+    /// Eigene Skala — eigenes Pane.
+    #[default]
+    Pane,
+}
+
+/// Indikatoren, deren Ausgabe in Preiseinheiten liegt.
+///
+/// Unbekannte Namen gelten als [`IndicatorPlacement::Pane`]: ein falsch platziertes
+/// Overlay verzerrt die Preisskala des Hauptcharts, ein überflüssiges Pane nicht.
+const PRICE_UNIT_INDICATORS: &[&str] = &[
+    "alligator",
+    "anchored_vwap",
+    "bollinger",
+    "chandelier_exit",
+    "chandelier_flip_radar",
+    "dema",
+    "donchian",
+    "ema",
+    "envelope",
+    "hma",
+    "ichimoku",
+    "kama",
+    "keltner",
+    "lsma",
+    "mcginley",
+    "midas",
+    "parabolic_sar",
+    "sma",
+    "supertrend",
+    "tema",
+    "vwap",
+    "vwma",
+    "wma",
+    "zigzag",
+    "zigzag_advanced",
+];
+
+/// Zusatzwerte aus `IndicatorOutput::extra`, die eine eigene Linie sind.
+///
+/// Chartkit legt Nebenserien überwiegend in `extra` ab (44 der Indikatoren nutzen
+/// `with_extra`, nur 5 das Feld `secondary`) — MACDs Signallinie und Histogramm etwa,
+/// oder die Bänder von Bollinger, Keltner und Donchian. Dort stehen aber auch Werte,
+/// die **keine** Linie sind: `bandwidth`, `percent_b`, `width`, `atr`, `trend`. Die
+/// als Linie zu zeichnen würde die Skala des Panes verzerren.
+///
+/// Deshalb eine ausdrückliche Liste statt „alles aus `extra`". Die Namen sind über
+/// Chartkit hinweg einheitlich vergeben, sie gilt also nicht je Indikator.
+const SERIES_EXTRA_KEYS: &[&str] = &[
+    "basis", "upper", "lower", "signal", "hist", "tenkan", "kijun", "senkou_a", "senkou_b",
+];
+
+/// Reihenfolge der Linien — fest, damit Farben und Fixtures stabil bleiben.
+const LINE_ORDER: &[&str] = &[
+    "value",
+    "basis",
+    "upper",
+    "lower",
+    "secondary",
+    "signal",
+    "hist",
+    "tenkan",
+    "kijun",
+    "senkou_a",
+    "senkou_b",
+];
+/// Wohin dieser Indikator gehört.
+pub fn placement_for(name: &str) -> IndicatorPlacement {
+    if PRICE_UNIT_INDICATORS.contains(&name) {
+        IndicatorPlacement::Overlay
+    } else {
+        IndicatorPlacement::Pane
+    }
+}
+
+/// Eine benannte Linie einer Indikatorausgabe.
+#[derive(Debug, Clone, Default)]
+pub struct IndicatorLine {
+    pub label: &'static str,
+    pub points: Vec<(i64, f64)>,
+}
+
 /// Eine laufende Indikator-Instanz mit ihren bisherigen Ausgaben.
 pub struct IndicatorSeries {
     name: String,
     params: HashMap<String, f64>,
     inner: Box<dyn Indicator>,
-    /// Zeit/Wert-Paare, in Kerzenreihenfolge. Nur Bars nach dem Warmup liefern etwas.
-    values: Vec<(i64, f64)>,
+    /// Alle Linien der Ausgabe in fester Reihenfolge ([`LINE_ORDER`]). Sie alle zu
+    /// zeichnen ist der Unterschied zwischen einem MACD und einer einzelnen Linie,
+    /// die so tut, als wäre sie einer.
+    lines: Vec<IndicatorLine>,
     /// Wie viele Kerzen bereits eingespeist wurden.
     fed: usize,
     /// Zeitstempel der zuletzt eingespeisten Kerze — erkennt Serienwechsel.
@@ -38,7 +135,13 @@ impl IndicatorSeries {
             name: name.to_string(),
             params,
             inner,
-            values: Vec::new(),
+            lines: LINE_ORDER
+                .iter()
+                .map(|label| IndicatorLine {
+                    label,
+                    points: Vec::new(),
+                })
+                .collect(),
             fed: 0,
             last_time: None,
         })
@@ -57,14 +160,27 @@ impl IndicatorSeries {
         &self.params
     }
 
+    /// Die Hauptlinie.
     pub fn values(&self) -> &[(i64, f64)] {
-        &self.values
+        &self.lines[0].points
+    }
+
+    /// Alle Linien, die tatsächlich Werte haben.
+    pub fn lines(&self) -> impl Iterator<Item = &IndicatorLine> {
+        self.lines.iter().filter(|l| !l.points.is_empty())
+    }
+
+    /// Wohin dieser Indikator gehört.
+    pub fn placement(&self) -> IndicatorPlacement {
+        placement_for(&self.name)
     }
 
     /// Verwirft den Zustand und beginnt von vorn.
     pub fn reset(&mut self) {
         self.inner.reset();
-        self.values.clear();
+        for line in &mut self.lines {
+            line.points.clear();
+        }
         self.fed = 0;
         self.last_time = None;
     }
@@ -94,8 +210,19 @@ impl IndicatorSeries {
                 candle.v,
             );
             if let Some(out) = self.inner.on_bar(&bar) {
-                if out.value.is_finite() {
-                    self.values.push((candle.time, out.value));
+                for line in &mut self.lines {
+                    let value = match line.label {
+                        "value" => Some(out.value),
+                        "secondary" => out.secondary,
+                        "signal" => out.signal.or_else(|| out.extra.get("signal").copied()),
+                        key if SERIES_EXTRA_KEYS.contains(&key) => out.extra.get(key).copied(),
+                        _ => None,
+                    };
+                    if let Some(v) = value {
+                        if v.is_finite() {
+                            line.points.push((candle.time, v));
+                        }
+                    }
                 }
             }
             self.last_time = Some(candle.time);
@@ -109,7 +236,7 @@ impl std::fmt::Debug for IndicatorSeries {
         f.debug_struct("IndicatorSeries")
             .field("name", &self.name)
             .field("fed", &self.fed)
-            .field("values", &self.values.len())
+            .field("values", &self.lines[0].points.len())
             .finish()
     }
 }
@@ -159,6 +286,40 @@ mod tests {
         }
 
         assert_eq!(at_once.values(), stepwise.values());
+    }
+
+    #[test]
+    fn macd_delivers_more_than_one_line() {
+        let mut series = IndicatorSeries::new("macd", HashMap::new()).unwrap();
+        series.feed(&candles(120));
+        assert!(
+            series.lines().count() >= 2,
+            "MACD hat Signallinie und/oder Histogramm, nicht nur einen Wert"
+        );
+    }
+
+    #[test]
+    fn placement_separates_price_units_from_own_scales() {
+        assert_eq!(placement_for("bollinger"), IndicatorPlacement::Overlay);
+        assert_eq!(placement_for("supertrend"), IndicatorPlacement::Overlay);
+        assert_eq!(placement_for("rsi"), IndicatorPlacement::Pane);
+        assert_eq!(placement_for("macd"), IndicatorPlacement::Pane);
+        assert_eq!(
+            placement_for("gibtsnicht"),
+            IndicatorPlacement::Pane,
+            "unbekannt gilt als Pane — ein falsches Overlay verzerrt die Preisskala"
+        );
+    }
+
+    #[test]
+    fn every_overlay_name_exists_in_the_catalog() {
+        let known = IndicatorSeries::available();
+        for name in PRICE_UNIT_INDICATORS {
+            assert!(
+                known.iter().any(|k| k == name),
+                "{name} steht in der Overlay-Liste, aber nicht in Chartkits Katalog"
+            );
+        }
     }
 
     #[test]
