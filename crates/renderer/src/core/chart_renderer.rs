@@ -5,6 +5,9 @@
 //! Hier schreibt er in einen `&mut dyn Renderer`: im Browser der Canvas-Renderer,
 //! im Test der `BatchRenderer`, der den Befehlsstrom mitschreibt.
 
+use std::collections::HashMap;
+
+use crate::core::indicators::IndicatorSeries;
 use crate::core::{Candle, ChartState, FootprintCandle};
 use crate::primitives::Color;
 use crate::rendering::Renderer;
@@ -17,11 +20,43 @@ pub struct CompareSymbol {
 }
 
 /// Ein Indikator-Pane unterhalb des Hauptcharts.
+///
+/// Trägt seine eigene, laufende Indikator-Instanz — die Werte werden inkrementell
+/// fortgeschrieben (`update_indicator_panes`), nicht bei jedem Frame neu gerechnet.
 pub struct IndicatorPane {
     pub pane_id: String,
     pub indicator_id: String,
     pub params_json: String,
     pub height_fraction: f64,
+    pub series: IndicatorSeries,
+}
+
+impl IndicatorPane {
+    /// Legt ein Pane für einen Indikator aus dem Chartkit-Katalog an.
+    pub fn new(
+        pane_id: impl Into<String>,
+        indicator_id: &str,
+        params: HashMap<String, f64>,
+        height_fraction: f64,
+    ) -> Result<Self, String> {
+        let params_json = serde_json::to_string(&params).unwrap_or_else(|_| "{}".to_string());
+        Ok(Self {
+            pane_id: pane_id.into(),
+            indicator_id: indicator_id.to_string(),
+            params_json,
+            height_fraction,
+            series: IndicatorSeries::new(indicator_id, params)?,
+        })
+    }
+}
+
+/// Schreibt die Indikatorwerte aller Panes fort.
+///
+/// Vor `render_chart` aufzurufen: der Renderloop selbst rechnet nicht, er liest nur.
+pub fn update_indicator_panes(panes: &mut [IndicatorPane], candles: &[Candle]) {
+    for pane in panes {
+        pane.series.feed(candles);
+    }
 }
 
 /// Alles, was der Loop außer dem Chart-Zustand braucht.
@@ -652,9 +687,10 @@ fn render_indicator_panes(
         // Separator between content and scale column
         renderer.draw_line(content_w, top, content_w, top + pane_h, border, 1.0);
 
-        let series = oscillator_series(&pane.indicator_id, &state.candles);
+        let series = pane.series.values();
         let visible: Vec<(i64, f64)> = series
-            .into_iter()
+            .iter()
+            .copied()
             .filter(|(time, value)| {
                 *time >= vp.time.start && *time <= vp.time.end && value.is_finite()
             })
@@ -794,13 +830,4 @@ fn format_axis_time(time: i64) -> String {
     chrono::DateTime::from_timestamp(time, 0)
         .map(|dt| dt.format("%m-%d %H:%M").to_string())
         .unwrap_or_else(|| time.to_string())
-}
-
-/// Werte für einen Oszillator-Pane.
-///
-/// Bis M3 leer: die Berechnung kommt aus `kestrel-chartkit`
-/// (`build_checked` + `Indicator::on_bar`), nicht aus diesem Repo.
-/// Der Pane wird dadurch mit Rahmen und Achse gezeichnet, aber ohne Linie.
-fn oscillator_series(_indicator_id: &str, _candles: &[Candle]) -> Vec<(i64, f64)> {
-    Vec::new()
 }

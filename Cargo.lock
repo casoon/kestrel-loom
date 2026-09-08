@@ -340,11 +340,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "kestrel-chartkit"
+version = "0.1.2"
+source = "git+https://github.com/casoon/kestrel-chartkit.git?tag=v0.1.2#94778610dffa9b986e734aaeab7943727d8115d7"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "kestrel-loom"
 version = "0.1.0"
 dependencies = [
  "chrono",
  "criterion",
+ "kestrel-chartkit",
  "serde",
  "serde_json",
  "uuid",

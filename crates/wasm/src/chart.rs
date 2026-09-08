@@ -1,5 +1,7 @@
 //! WASM Entry Point - JavaScript API for the chart engine
 
+use std::collections::HashMap;
+
 use wasm_bindgen::prelude::*;
 
 use web_sys::HtmlCanvasElement;
@@ -10,7 +12,9 @@ use kestrel_loom::core::{
 };
 
 use crate::canvas2d::Canvas2DRenderer;
-use kestrel_loom::core::{render_chart, CompareSymbol, IndicatorPane, RenderExtras};
+use kestrel_loom::core::{
+    render_chart, update_indicator_panes, CompareSymbol, IndicatorPane, RenderExtras,
+};
 
 /// Main WASM Chart instance that can be controlled from JavaScript
 #[wasm_bindgen]
@@ -598,6 +602,9 @@ impl WasmChart {
             .as_mut()
             .ok_or_else(|| JsValue::from_str("No renderer attached"))?;
 
+        // Indikatorwerte fortschreiben, bevor gezeichnet wird — der Loop rechnet nicht.
+        update_indicator_panes(&mut self.indicator_panes, &self.state.candles);
+
         let extras = RenderExtras {
             indicator_panes: &self.indicator_panes,
             compare_symbols: &self.compare_symbols,
@@ -989,27 +996,46 @@ impl WasmChart {
 
     /// Create or replace an indicator pane. Returns the pane ID.
     #[wasm_bindgen(js_name = addIndicatorPane)]
-    pub fn add_indicator_pane(&mut self, indicator_id: &str, params_json: &str) -> String {
+    pub fn add_indicator_pane(
+        &mut self,
+        indicator_id: &str,
+        params_json: &str,
+    ) -> Result<String, JsValue> {
+        let params = parse_params(params_json)?;
         let pane_id = format!("pane-{}", indicator_id.trim());
+
         if let Some(pane) = self
             .indicator_panes
             .iter_mut()
             .find(|pane| pane.indicator_id == indicator_id)
         {
-            pane.params_json = params_json.to_string();
+            // Geänderte Parameter heißen: neue Instanz. Ein inkrementeller Zustand
+            // darf nicht mit halb alten Parametern weiterlaufen.
+            let replacement = IndicatorPane::new(
+                pane.pane_id.clone(),
+                indicator_id,
+                params,
+                pane.height_fraction,
+            )
+            .map_err(|e| JsValue::from_str(&e))?;
+            *pane = replacement;
             self.state.mark_dirty();
-            return pane.pane_id.clone();
+            return Ok(pane_id);
         }
 
-        self.indicator_panes.push(IndicatorPane {
-            pane_id: pane_id.clone(),
-            indicator_id: indicator_id.to_string(),
-            params_json: params_json.to_string(),
-            height_fraction: 0.28,
-        });
+        let pane = IndicatorPane::new(pane_id.clone(), indicator_id, params, 0.28)
+            .map_err(|e| JsValue::from_str(&e))?;
+        self.indicator_panes.push(pane);
         self.normalize_indicator_panes();
         self.state.mark_dirty();
-        pane_id
+        Ok(pane_id)
+    }
+
+    /// Namen aller Indikatoren, die `kestrel-chartkit` kennt, als JSON-Array.
+    #[wasm_bindgen(js_name = availableIndicators)]
+    pub fn available_indicators() -> String {
+        serde_json::to_string(&kestrel_loom::core::IndicatorSeries::available())
+            .unwrap_or_else(|_| "[]".to_string())
     }
 
     /// Remove an indicator pane by pane ID.
@@ -1428,4 +1454,18 @@ impl WasmChart {
         self.state.mark_dirty();
         Ok(())
     }
+}
+
+/// Parst `{"rsi_len": 14}` in die Parameterform von `kestrel-chartkit`.
+///
+/// Ein leerer String und `{}` bedeuten „Standardparameter"; alles andere muss ein
+/// Objekt aus Zahlen sein — stillschweigend ignorierte Parameter wären schlimmer als
+/// eine Fehlermeldung.
+fn parse_params(params_json: &str) -> Result<HashMap<String, f64>, JsValue> {
+    let trimmed = params_json.trim();
+    if trimmed.is_empty() {
+        return Ok(HashMap::new());
+    }
+    serde_json::from_str::<HashMap<String, f64>>(trimmed)
+        .map_err(|e| JsValue::from_str(&format!("Ungültige Indikator-Parameter: {e}")))
 }

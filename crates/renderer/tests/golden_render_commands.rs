@@ -11,9 +11,11 @@
 //! UPDATE_GOLDEN=1 cargo test -p kestrel-loom --test golden_render_commands
 //! ```
 
+use std::collections::HashMap;
+
 use kestrel_loom::core::{
-    render_chart, CandleGenerator, ChartState, GeneratorConfig, PriceRange, RenderExtras,
-    TimeRange, Timeframe, Viewport,
+    render_chart, update_indicator_panes, CandleGenerator, ChartState, GeneratorConfig,
+    IndicatorPane, PriceRange, RenderExtras, TimeRange, Timeframe, Viewport,
 };
 use kestrel_loom::rendering::{cull_candles, DrawStyle};
 use kestrel_loom::tools::{ChartTool, HorizontalLine, ToolManager, ToolNode, TrendLine};
@@ -288,4 +290,49 @@ fn the_viewport_height_survives_the_frame() {
         before, state.viewport.dimensions.height,
         "der Loop verkleinert die Viewport-Höhe für Panes nur vorübergehend"
     );
+}
+
+/// Ein Frame mit einem RSI-Pane — die Werte stammen aus `kestrel-chartkit`.
+#[test]
+fn a_frame_with_an_indicator_pane_is_stable() {
+    let mut generator = CandleGenerator::new(
+        GeneratorConfig::crypto()
+            .with_seed(42)
+            .with_timeframe(Timeframe::M5),
+    );
+
+    let mut state = ChartState::new(800, 400, Timeframe::M5);
+    state.set_candles(generator.generate(150));
+    state.fit_to_data();
+
+    let mut panes = vec![IndicatorPane::new("pane-rsi", "rsi", HashMap::new(), 0.28)
+        .expect("rsi ist im Chartkit-Katalog")];
+    update_indicator_panes(&mut panes, &state.candles);
+
+    assert!(
+        !panes[0].series.values().is_empty(),
+        "der RSI muss nach dem Warmup Werte liefern"
+    );
+
+    let extras = RenderExtras {
+        indicator_panes: &panes,
+        ..Default::default()
+    };
+
+    let mut recorder = BatchRenderer::new(800, 400);
+    render_chart(&mut state, &extras, &mut recorder);
+
+    let actual = recorder
+        .commands()
+        .iter()
+        .map(format_command)
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert_golden("full_frame_with_rsi_pane", actual);
+}
+
+#[test]
+fn an_unknown_indicator_is_rejected() {
+    assert!(IndicatorPane::new("pane-x", "gibtsnicht", HashMap::new(), 0.28).is_err());
 }
