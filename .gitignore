@@ -3,3 +3,4 @@
 /plan
 .env
 .DS_Store
+/pkg

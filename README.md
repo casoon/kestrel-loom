@@ -23,7 +23,32 @@ wird bei der Übernahme **nicht** mitgenommen, sondern durch `kestrel-chartkit` 
 | `kestrel-report` | Batch-Berichte |
 | **`kestrel-loom`** | **interaktiver Renderer für Chartkit-Szenen** |
 
+## Aufbau
+
+```
+crates/renderer/   kestrel-loom        Kern: Zustand, Viewport, Skalen, Panes, Werkzeuge,
+                                       RenderCommand-Modell — ohne Browser-API
+crates/wasm/       kestrel-loom-wasm   wasm-bindgen-Fassade + Canvas-2D-Ausführung
+```
+
+Dass der Kern browserfrei ist, ist erzwungen und nicht bloß Absicht:
+`cargo tree -p kestrel-loom` enthält weder `web-sys` noch `js-sys` oder `wasm-bindgen`.
+
+## Bauen und prüfen
+
+```sh
+cargo test -p kestrel-loom          # Kern, ohne Browser
+./build-wasm.sh                     # WASM-Paket nach ./pkg
+```
+
 ## Stand
 
-Konzeptphase — noch kein Code. Konzept, Übernahme-Inventar und Meilensteine liegen im
-(gitignorierten) `plan/`-Verzeichnis.
+Kern und WASM-Fassade sind übernommen und lauffähig. Der eigentliche Zeichenablauf
+liegt noch in der WASM-Fassade und wird als Nächstes in den Kern gezogen; die
+Indikator-Anbindung an `kestrel-chartkit` steht aus. Konzept, Übernahme-Inventar und
+Meilensteine liegen im (gitignorierten) `plan/`-Verzeichnis.
+
+## Lizenz
+
+Noch nicht festgelegt — bewusst offen, siehe `plan/00-konzept.md` §6. Bis dahin
+`publish = false`.
