@@ -53,6 +53,26 @@ Eine kleine Seite mit deterministischen Kerzen: Darstellungswechsel
 Theme-Umschaltung. Sie ist bewusst klein gehalten — sie soll zeigen, dass die
 Kette Kern → WASM → Canvas trägt, und als Vorlage für die Einbindung dienen.
 
+## Einbinden
+
+```js
+import { createChart } from 'kestrel-loom/js/kestrel-loom.js';
+
+const chart = await createChart(canvas, { timeframe: '5m', dark: true });
+chart.data.set(candles);                 // [{ time, o, h, l, c, v }] in Unix-Sekunden
+chart.view.fit();
+chart.indicators.add('rsi');             // 91 Indikatoren aus kestrel-chartkit
+chart.tools.trendLine('t1', { time: 1600010000, price: 99 }, { time: 1600060000, price: 103 });
+```
+
+`js/kestrel-loom.js` gruppiert die 86 flachen Methoden der WASM-Fassade nach
+`data`, `view`, `style`, `indicators`, `tools`, `compare` und `state` und nimmt
+gleich das ab, was sonst jeder Aufrufer selbst schreibt: Canvas-Größe samt
+`devicePixelRatio`, `ResizeObserver`, Maus-/Touch-/Tastatureingaben, eine
+Zeichenschleife, die nur bei Änderungen rendert, JSON hin und zurück sowie die
+`BigInt`-Zeitstempel an der WASM-Grenze. Die flache API bleibt über `chart.raw`
+erreichbar.
+
 ## Examples
 
 Laufen alle ohne Browser:

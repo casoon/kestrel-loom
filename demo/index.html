@@ -49,13 +49,14 @@
     <div id="status">lädt…</div>
 
     <script type="module">
-      import init, { WasmChart } from '../pkg/kestrel_loom_wasm.js';
+      // Die Demo nutzt dieselbe Hülle, die auch Kestrel einbinden würde —
+      // sie ist damit zugleich der Beleg, dass die Hülle trägt.
+      import { createChart } from '../js/kestrel-loom.js';
 
       const status = document.getElementById('status');
       const canvas = document.getElementById('chart');
 
-      // Deterministische Kerzen (xorshift), damit die Demo bei jedem Laden
-      // dasselbe zeigt — wie die Fixtures im Testpfad.
+      // Deterministische Kerzen, damit die Demo bei jedem Laden dasselbe zeigt.
       function candles(n, seed = 42) {
         let s = seed >>> 0;
         const rnd = () => {
@@ -66,77 +67,36 @@
         };
         const out = [];
         let price = 100;
-        let t = 1600000000; // Unix-Sekunden
+        let time = 1600000000; // Unix-Sekunden
         for (let i = 0; i < n; i++) {
-          const drift = (rnd() - 0.48) * 0.9;
           const o = price;
-          const c = Math.max(1, o + drift);
-          const h = Math.max(o, c) + rnd() * 0.5;
-          const l = Math.min(o, c) - rnd() * 0.5;
-          out.push({ time: t, o, h, l, c, v: 100 + rnd() * 900 });
+          const c = Math.max(1, o + (rnd() - 0.48) * 0.9);
+          out.push({
+            time,
+            o,
+            h: Math.max(o, c) + rnd() * 0.5,
+            l: Math.min(o, c) - rnd() * 0.5,
+            c,
+            v: 100 + rnd() * 900,
+          });
           price = c;
-          t += 300; // M5
+          time += 300; // M5
         }
         return out;
       }
 
       try {
-        await init();
-
-        const dpr = window.devicePixelRatio || 1;
-        const rect = canvas.getBoundingClientRect();
-        canvas.width = Math.floor(rect.width * dpr);
-        canvas.height = Math.floor(rect.height * dpr);
-
-        const chart = new WasmChart(rect.width, rect.height, '5m');
-        chart.attachCanvas(canvas);
+        const chart = await createChart(canvas, { timeframe: '5m', dark: true });
 
         const data = candles(300);
-        chart.setCandles(JSON.stringify(data));
-        chart.fitToData();
-        chart.render();
+        chart.data.set(data);
+        chart.view.fit();
 
         document.getElementById('count').textContent = `${data.length} Kerzen`;
         status.textContent = 'ok — Zoom mit dem Mausrad, Pan mit gedrückter Maustaste.';
 
-        const redraw = () => chart.render();
-
-        canvas.addEventListener('mousedown', (e) => {
-          const r = canvas.getBoundingClientRect();
-          chart.onMouseDown(e.clientX - r.left, e.clientY - r.top, 0);
-          redraw();
-        });
-        canvas.addEventListener('mousemove', (e) => {
-          const r = canvas.getBoundingClientRect();
-          chart.onMouseMove(e.clientX - r.left, e.clientY - r.top);
-          redraw();
-        });
-        window.addEventListener('mouseup', (e) => {
-          const r = canvas.getBoundingClientRect();
-          chart.onMouseUp(e.clientX - r.left, e.clientY - r.top, 0);
-          redraw();
-        });
-        canvas.addEventListener('wheel', (e) => {
-          e.preventDefault();
-          const r = canvas.getBoundingClientRect();
-          chart.onMouseWheel(e.clientX - r.left, e.clientY - r.top, e.deltaY);
-          redraw();
-        }, { passive: false });
-
-        document.getElementById('style').addEventListener('change', (e) => {
-          // Fehler nicht verschlucken — eine unbekannte Darstellung sähe sonst
-          // aus wie "nichts passiert".
-          try {
-            chart.setCandleStyle(e.target.value);
-            redraw();
-            status.textContent = 'Darstellung: ' + e.target.value;
-          } catch (err) {
-            status.textContent = 'setCandleStyle("' + e.target.value + '") abgelehnt: ' + err;
-          }
-        });
-        // Indikatoren kommen aus kestrel-chartkit, nicht aus diesem Repo.
         const indicatorSelect = document.getElementById('indicator');
-        const all = JSON.parse(WasmChart.availableIndicators());
+        const all = chart.indicators.available();
         for (const name of all) {
           const opt = document.createElement('option');
           opt.value = name;
@@ -147,32 +107,32 @@
           const name = e.target.value;
           if (!name) return;
           try {
-            chart.addIndicatorPane(name, '{}');
-            redraw();
+            chart.indicators.add(name);
             status.textContent = `Indikator ${name} — ${all.length} im Katalog`;
           } catch (err) {
-            status.textContent = `addIndicatorPane("${name}") abgelehnt: ${err}`;
+            status.textContent = `indicators.add("${name}") abgelehnt: ${err}`;
           }
         });
 
-        document.getElementById('fit').addEventListener('click', () => {
-          chart.fitToData();
-          redraw();
+        document.getElementById('style').addEventListener('change', (e) => {
+          try {
+            chart.style.set(e.target.value);
+            status.textContent = 'Darstellung: ' + e.target.value;
+          } catch (err) {
+            status.textContent = `style.set("${e.target.value}") abgelehnt: ${err}`;
+          }
         });
+
+        document.getElementById('fit').addEventListener('click', () => chart.view.fit());
+
         let dark = true;
         document.getElementById('theme').addEventListener('click', () => {
           dark = !dark;
-          chart.setTheme(dark);
-          redraw();
+          chart.view.theme(dark);
         });
 
-        window.addEventListener('resize', () => {
-          const r = canvas.getBoundingClientRect();
-          canvas.width = Math.floor(r.width * dpr);
-          canvas.height = Math.floor(r.height * dpr);
-          chart.resize(r.width, r.height);
-          redraw();
-        });
+        // Für die Konsole
+        window.chart = chart;
       } catch (err) {
         status.textContent = 'Fehler: ' + err;
         console.error(err);
