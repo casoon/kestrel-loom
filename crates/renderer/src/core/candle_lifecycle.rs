@@ -117,7 +117,11 @@ mod tests {
     #[test]
     fn snapshot_sorts_unsorted_input() {
         let mut store = CandleStore::new();
-        store.apply(CandleEvent::Snapshot(vec![c(30, 3.0), c(10, 1.0), c(20, 2.0)]));
+        store.apply(CandleEvent::Snapshot(vec![
+            c(30, 3.0),
+            c(10, 1.0),
+            c(20, 2.0),
+        ]));
 
         let times: Vec<i64> = store.candles().iter().map(|c| c.time).collect();
         assert_eq!(times, vec![10, 20, 30]);
@@ -231,7 +235,11 @@ mod tests {
     #[test]
     fn backfill_maintains_sort_order() {
         let mut store = CandleStore::new();
-        store.apply(CandleEvent::Backfill(vec![c(300, 3.0), c(100, 1.0), c(200, 2.0)]));
+        store.apply(CandleEvent::Backfill(vec![
+            c(300, 3.0),
+            c(100, 1.0),
+            c(200, 2.0),
+        ]));
 
         let times: Vec<i64> = store.candles().iter().map(|c| c.time).collect();
         assert_eq!(times, vec![100, 200, 300]);

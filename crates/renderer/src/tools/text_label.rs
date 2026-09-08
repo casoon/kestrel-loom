@@ -55,7 +55,13 @@ impl ChartTool for TextLabel {
         if let Some(bg) = self.background {
             let text_w = self.text.len() as f64 * (self.font_size as f64 * 0.6);
             let pad = 4.0;
-            renderer.fill_rect(x, y - self.font_size as f64 - pad, text_w + pad * 2.0, self.font_size as f64 + pad * 2.0, bg);
+            renderer.fill_rect(
+                x,
+                y - self.font_size as f64 - pad,
+                text_w + pad * 2.0,
+                self.font_size as f64 + pad * 2.0,
+                bg,
+            );
         }
 
         renderer.draw_text(

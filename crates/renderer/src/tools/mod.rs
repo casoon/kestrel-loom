@@ -305,7 +305,8 @@ impl ToolManager {
                 data,
             });
         }
-        serde_json::to_string(&envelopes).map_err(|e| format!("ToolManager serialization error: {}", e))
+        serde_json::to_string(&envelopes)
+            .map_err(|e| format!("ToolManager serialization error: {}", e))
     }
 
     /// Restore a `ToolManager` from a JSON string produced by `to_json`.
@@ -337,8 +338,10 @@ impl ToolManager {
                     Box::new(t)
                 }
                 ToolType::FibonacciRetracement => {
-                    let t: FibonacciRetracement = serde_json::from_value(env.data)
-                        .map_err(|e| format!("FibonacciRetracement deserialization error: {}", e))?;
+                    let t: FibonacciRetracement =
+                        serde_json::from_value(env.data).map_err(|e| {
+                            format!("FibonacciRetracement deserialization error: {}", e)
+                        })?;
                     Box::new(t)
                 }
                 ToolType::TextLabel => {
@@ -498,8 +501,7 @@ mod tests {
         let candles = vec![make_candle(1000, 99.0, 101.0, 98.0, 100.0)];
 
         // Query far away (time=9000, price=90) — pixel distance >> threshold
-        let (snapped_time, snapped_price) =
-            mgr.snap_to_candle(9000, 90.0, &candles, 5.0, &vp);
+        let (snapped_time, snapped_price) = mgr.snap_to_candle(9000, 90.0, &candles, 5.0, &vp);
         assert_eq!(snapped_time, 9000);
         assert!((snapped_price - 90.0).abs() < 1e-10);
     }

@@ -6,9 +6,9 @@ use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement};
 
 use js_sys;
 
-use kestrel_loom::rendering::{RenderCommand, Renderer, TextAlign, TextBaseline};
 use kestrel_loom::canvas::{BitmapSpace, CssPixels, DevicePixels, MediaSpace, PixelRatio};
 use kestrel_loom::primitives::Color;
+use kestrel_loom::rendering::{RenderCommand, Renderer, TextAlign, TextBaseline};
 
 pub struct Canvas2DRenderer {
     pub ctx: CanvasRenderingContext2d,

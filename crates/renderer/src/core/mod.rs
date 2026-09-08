@@ -2,9 +2,9 @@
 
 mod adaptive_fps;
 mod bar_index;
+mod buffer;
 mod candle_buffer;
 mod candle_lifecycle;
-mod buffer;
 mod chart;
 
 mod chart_state;
@@ -22,12 +22,11 @@ mod scale;
 mod types;
 mod viewport;
 
-
 pub use adaptive_fps::{AdaptiveFPSConfig, AdaptiveFrameScheduler, FPSStats, RenderComplexity};
 pub use bar_index::{BarCoordMapper, BarIndex};
+pub use buffer::ChartBuffer;
 pub use candle_buffer::CandleBuffer;
 pub use candle_lifecycle::{CandleEvent, CandleStore};
-pub use buffer::ChartBuffer;
 pub use chart::Chart;
 pub use chart_state::{ChartOptions, ChartState, CrosshairState, InteractionState, MagnetMode};
 pub use config::ChartConfig;
@@ -36,9 +35,11 @@ pub use footprint::{FootprintCandle, FootprintConfig, FootprintLevel, FootprintR
 pub use generator::{
     CandleGenerator, GeneratorConfig, MarketType, Scenario, Trend, VolatilityRegime,
 };
-pub use invalidation::{InvalidationLevel, InvalidationLevels, InvalidationMask, LayeredInvalidation, RenderLayer};
-pub use types::{Candle, Point, SessionConfig, Timeframe};
-pub use viewport::{Dimensions, PriceRange, TimeRange, Viewport, ViewportScaleMode};
+pub use invalidation::{
+    InvalidationLevel, InvalidationLevels, InvalidationMask, LayeredInvalidation, RenderLayer,
+};
 pub use overlay::{ChartOverlay, OverlayRegistry};
 pub use pane::{Pane, PaneLayout};
 pub use scale::{PriceScale, ScaleMode};
+pub use types::{Candle, Point, SessionConfig, Timeframe};
+pub use viewport::{Dimensions, PriceRange, TimeRange, Viewport, ViewportScaleMode};

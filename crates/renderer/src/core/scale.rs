@@ -138,11 +138,7 @@ impl PriceScale {
             ScaleMode::Linear => (min, max, value),
             ScaleMode::Log => {
                 let eps = 1e-10;
-                (
-                    min.max(eps).ln(),
-                    max.max(eps).ln(),
-                    value.max(eps).ln(),
-                )
+                (min.max(eps).ln(), max.max(eps).ln(), value.max(eps).ln())
             }
             ScaleMode::Percent => {
                 let base = if self.base_price == 0.0 {
@@ -162,11 +158,7 @@ impl PriceScale {
                 } else {
                     self.base_price
                 };
-                (
-                    min / base * 100.0,
-                    max / base * 100.0,
-                    value / base * 100.0,
-                )
+                (min / base * 100.0, max / base * 100.0, value / base * 100.0)
             }
         }
     }

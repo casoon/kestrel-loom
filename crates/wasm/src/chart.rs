@@ -265,7 +265,9 @@ impl WasmChart {
         self.footprint_enabled = enabled;
         if enabled {
             self.state.options.candle_style = kestrel_loom::primitives::CandleStyle::Footprint;
-        } else if self.state.options.candle_style == kestrel_loom::primitives::CandleStyle::Footprint {
+        } else if self.state.options.candle_style
+            == kestrel_loom::primitives::CandleStyle::Footprint
+        {
             self.state.options.candle_style = kestrel_loom::primitives::CandleStyle::Candlestick;
         }
         self.state.mark_dirty();
@@ -389,7 +391,10 @@ impl WasmChart {
         if indicator_panes.is_empty() {
             return height;
         }
-        let indicator_total: f64 = indicator_panes.iter().map(|pane| pane.height_fraction).sum();
+        let indicator_total: f64 = indicator_panes
+            .iter()
+            .map(|pane| pane.height_fraction)
+            .sum();
         height * (1.0 - indicator_total).max(0.38)
     }
 
@@ -412,8 +417,9 @@ impl WasmChart {
             return;
         }
 
-        let price_per_pixel =
-            ((vp.price.max - vp.price.min) / vp.dimensions.height as f64).abs().max(0.0000001);
+        let price_per_pixel = ((vp.price.max - vp.price.min) / vp.dimensions.height as f64)
+            .abs()
+            .max(0.0000001);
         let bid_color = kestrel_loom::primitives::Color::rgba(248, 81, 73, 0.72);
         let ask_color = kestrel_loom::primitives::Color::rgba(63, 185, 80, 0.72);
         let poc_color = kestrel_loom::primitives::Color::rgba(227, 179, 65, 0.32);
@@ -492,11 +498,7 @@ impl WasmChart {
         let fill = kestrel_loom::primitives::Color::rgba(88, 166, 255, 0.22);
 
         for tool in state.tool_manager.tools() {
-            if !state
-                .selected_drawings
-                .iter()
-                .any(|id| id == tool.id())
-            {
+            if !state.selected_drawings.iter().any(|id| id == tool.id()) {
                 continue;
             }
 
@@ -542,7 +544,10 @@ impl WasmChart {
         let vp = &state.viewport;
         let width = vp.dimensions.width as f64;
         let height = vp.dimensions.height as f64;
-        let indicator_total: f64 = indicator_panes.iter().map(|pane| pane.height_fraction).sum();
+        let indicator_total: f64 = indicator_panes
+            .iter()
+            .map(|pane| pane.height_fraction)
+            .sum();
         let mut top = height * (1.0 - indicator_total).max(0.38);
         let bg = state.options.background_color.with_alpha(1.0);
         let border = state.options.grid_color.with_alpha(0.8);
@@ -558,8 +563,13 @@ impl WasmChart {
             // Pane background: only the content area (not the price-axis column)
             renderer.fill_rect(0.0, top, content_w, pane_h, bg);
             // Price-axis column background for this pane
-            renderer.fill_rect(content_w, top, price_axis_w, pane_h,
-                state.options.background_color.with_alpha(0.82));
+            renderer.fill_rect(
+                content_w,
+                top,
+                price_axis_w,
+                pane_h,
+                state.options.background_color.with_alpha(0.82),
+            );
             // Top border across full width
             renderer.draw_line(0.0, top, width, top, border, 1.0);
             // Separator between content and scale column
@@ -574,7 +584,10 @@ impl WasmChart {
                 .collect();
 
             if visible.len() >= 2 {
-                let mut min_v = visible.iter().map(|(_, v)| *v).fold(f64::INFINITY, f64::min);
+                let mut min_v = visible
+                    .iter()
+                    .map(|(_, v)| *v)
+                    .fold(f64::INFINITY, f64::min);
                 let mut max_v = visible
                     .iter()
                     .map(|(_, v)| *v)
@@ -595,7 +608,11 @@ impl WasmChart {
                     .iter()
                     .map(|(time, value)| (vp.time_to_x(*time), value_to_y(*value)))
                     .collect();
-                renderer.draw_polyline(&points, kestrel_loom::primitives::Color::rgba(88, 166, 255, 0.95), 1.6);
+                renderer.draw_polyline(
+                    &points,
+                    kestrel_loom::primitives::Color::rgba(88, 166, 255, 0.95),
+                    1.6,
+                );
 
                 // Scale labels in the price-axis column (right 64px)
                 for i in 0..=2 {
@@ -644,8 +661,22 @@ impl WasmChart {
         let time_axis_h = 20.0;
         renderer.fill_rect(width - price_axis_w, 0.0, price_axis_w, main_height, bg);
         renderer.fill_rect(0.0, height - time_axis_h, width, time_axis_h, bg);
-        renderer.draw_line(width - price_axis_w, 0.0, width - price_axis_w, main_height, grid, 1.0);
-        renderer.draw_line(0.0, height - time_axis_h, width, height - time_axis_h, grid, 1.0);
+        renderer.draw_line(
+            width - price_axis_w,
+            0.0,
+            width - price_axis_w,
+            main_height,
+            grid,
+            1.0,
+        );
+        renderer.draw_line(
+            0.0,
+            height - time_axis_h,
+            width,
+            height - time_axis_h,
+            grid,
+            1.0,
+        );
 
         let price_lines = 6;
         let price_step = (vp.price.max - vp.price.min) / price_lines as f64;
@@ -1045,10 +1076,7 @@ impl WasmChart {
         // We shrink the viewport height to main_height so that price_to_y and
         // all grid/candle Y calculations map correctly to the main chart area.
         let full_height = self.state.viewport.dimensions.height;
-        let main_height = Self::main_chart_height(
-            &self.indicator_panes,
-            full_height as f64,
-        );
+        let main_height = Self::main_chart_height(&self.indicator_panes, full_height as f64);
         self.state.viewport.dimensions.height = main_height as u32;
 
         // Draw grid
@@ -1107,16 +1135,19 @@ impl WasmChart {
             // For Renko: transform candles first, then render as candlestick bricks
             let renko_bricks: Vec<Candle>;
             let owned_visible: Vec<Candle>;
-            let render_candles: &[Candle] = if let kestrel_loom::primitives::CandleStyle::Renko { brick_size } = candle_style {
-                renko_bricks = kestrel_loom::core::renko::compute_renko(&self.state.candles, brick_size);
-                &renko_bricks
-            } else {
-                owned_visible = visible_candles.iter().map(|c| (*c).clone()).collect();
-                &owned_visible
-            };
+            let render_candles: &[Candle] =
+                if let kestrel_loom::primitives::CandleStyle::Renko { brick_size } = candle_style {
+                    renko_bricks =
+                        kestrel_loom::core::renko::compute_renko(&self.state.candles, brick_size);
+                    &renko_bricks
+                } else {
+                    owned_visible = visible_candles.iter().map(|c| (*c).clone()).collect();
+                    &owned_visible
+                };
 
             match candle_style {
-                kestrel_loom::primitives::CandleStyle::Line | kestrel_loom::primitives::CandleStyle::Area => {
+                kestrel_loom::primitives::CandleStyle::Line
+                | kestrel_loom::primitives::CandleStyle::Area => {
                     // Render as polyline / filled area through close prices
                     let points: Vec<(f64, f64)> = render_candles
                         .iter()
@@ -1149,7 +1180,11 @@ impl WasmChart {
                         let bot_y = vp.price_to_y(candle.l);
                         let height = (bot_y - top_y).abs().max(1.0);
                         let w = bar_width / pixel_ratio;
-                        let color = if candle.c >= candle.o { bullish_color } else { bearish_color };
+                        let color = if candle.c >= candle.o {
+                            bullish_color
+                        } else {
+                            bearish_color
+                        };
                         renderer.fill_rect(x - w / 2.0, top_y, w, height, color);
                         renderer.stroke_rect(x - w / 2.0, top_y, w, height, unchanged_color, 0.5);
                     }
@@ -1174,20 +1209,41 @@ impl WasmChart {
                         match candle_style {
                             kestrel_loom::primitives::CandleStyle::Candlestick => {
                                 renderer.draw_candle(
-                                    x, open_y, high_y, low_y, close_y, width,
-                                    bullish_color, bearish_color, unchanged_color,
+                                    x,
+                                    open_y,
+                                    high_y,
+                                    low_y,
+                                    close_y,
+                                    width,
+                                    bullish_color,
+                                    bearish_color,
+                                    unchanged_color,
                                 );
                             }
                             kestrel_loom::primitives::CandleStyle::OHLC => {
                                 renderer.draw_ohlc(
-                                    x, open_y, high_y, low_y, close_y, width,
-                                    bullish_color, bearish_color, unchanged_color,
+                                    x,
+                                    open_y,
+                                    high_y,
+                                    low_y,
+                                    close_y,
+                                    width,
+                                    bullish_color,
+                                    bearish_color,
+                                    unchanged_color,
                                 );
                             }
                             kestrel_loom::primitives::CandleStyle::Hollow => {
                                 renderer.draw_hollow_candle(
-                                    x, open_y, high_y, low_y, close_y, width,
-                                    bullish_color, bearish_color, unchanged_color,
+                                    x,
+                                    open_y,
+                                    high_y,
+                                    low_y,
+                                    close_y,
+                                    width,
+                                    bullish_color,
+                                    bearish_color,
+                                    unchanged_color,
                                 );
                             }
                             _ => unreachable!(),
@@ -1262,7 +1318,12 @@ impl WasmChart {
 
         // Draw comparison symbols as percent-performance overlays with their
         // own right-side scale.
-        renderer.set_clip(0.0, 0.0, self.state.viewport.dimensions.width as f64, main_height);
+        renderer.set_clip(
+            0.0,
+            0.0,
+            self.state.viewport.dimensions.width as f64,
+            main_height,
+        );
         Self::render_compare_symbols(&self.compare_symbols, &self.state, renderer, main_height);
         renderer.clear_clip();
         Self::render_indicator_panes(&self.indicator_panes, &self.state, renderer);
@@ -1468,8 +1529,14 @@ impl WasmChart {
         self._push_undo();
         let tool = Rectangle::with_corners(
             id.to_string(),
-            ToolNode { time: t1, price: p1 },
-            ToolNode { time: t2, price: p2 },
+            ToolNode {
+                time: t1,
+                price: p1,
+            },
+            ToolNode {
+                time: t2,
+                price: p2,
+            },
         );
         self.state.tool_manager.add_tool(Box::new(tool));
         self.state.mark_dirty();
@@ -1490,8 +1557,14 @@ impl WasmChart {
         self._push_undo();
         let tool = FibonacciRetracement::with_points(
             id.to_string(),
-            ToolNode { time: t1, price: p1 },
-            ToolNode { time: t2, price: p2 },
+            ToolNode {
+                time: t1,
+                price: p1,
+            },
+            ToolNode {
+                time: t2,
+                price: p2,
+            },
         );
         self.state.tool_manager.add_tool(Box::new(tool));
         self.state.mark_dirty();
@@ -1509,11 +1582,7 @@ impl WasmChart {
     ) -> Result<(), JsValue> {
         use kestrel_loom::tools::{TextLabel, ToolNode};
         self._push_undo();
-        let tool = TextLabel::new(
-            id.to_string(),
-            ToolNode { time, price },
-            text,
-        );
+        let tool = TextLabel::new(id.to_string(), ToolNode { time, price }, text);
         self.state.tool_manager.add_tool(Box::new(tool));
         self.state.mark_dirty();
         Ok(())
@@ -1946,8 +2015,14 @@ impl WasmChart {
         self._push_undo();
         let tool = Ellipse::with_corners(
             id.to_string(),
-            ToolNode { time: t1, price: p1 },
-            ToolNode { time: t2, price: p2 },
+            ToolNode {
+                time: t1,
+                price: p1,
+            },
+            ToolNode {
+                time: t2,
+                price: p2,
+            },
         );
         self.state.tool_manager.add_tool(Box::new(tool));
         self.state.mark_dirty();
@@ -1965,7 +2040,11 @@ impl WasmChart {
             "off" => MagnetMode::Off,
             "weak" => MagnetMode::Weak,
             "strong" => MagnetMode::Strong,
-            _ => return Err(JsValue::from_str("Invalid magnet mode. Use: off, weak, strong")),
+            _ => {
+                return Err(JsValue::from_str(
+                    "Invalid magnet mode. Use: off, weak, strong",
+                ))
+            }
         };
         Ok(())
     }
@@ -1989,11 +2068,13 @@ impl WasmChart {
         let threshold_px = 20.0;
         let (snapped_time, snapped_price) = match self.state.magnet_mode {
             MagnetMode::Off => (time, price),
-            MagnetMode::Weak | MagnetMode::Strong => {
-                self.state.tool_manager.snap_to_candle(
-                    time, price, &self.state.candles, threshold_px, &self.state.viewport,
-                )
-            }
+            MagnetMode::Weak | MagnetMode::Strong => self.state.tool_manager.snap_to_candle(
+                time,
+                price,
+                &self.state.candles,
+                threshold_px,
+                &self.state.viewport,
+            ),
         };
         let snapped = snapped_time != time || snapped_price != price;
         let info = serde_json::json!({
@@ -2083,7 +2164,11 @@ impl WasmChart {
                 }
                 ViewportScaleMode::Indexed
             }
-            _ => return Err(JsValue::from_str("Invalid scale mode. Use: price, log, percent, indexed")),
+            _ => {
+                return Err(JsValue::from_str(
+                    "Invalid scale mode. Use: price, log, percent, indexed",
+                ))
+            }
         };
         self.state.mark_dirty();
         Ok(())
@@ -2110,7 +2195,8 @@ impl WasmChart {
         if brick_size <= 0.0 {
             return Err(JsValue::from_str("brick_size must be > 0"));
         }
-        self.state.options.candle_style = kestrel_loom::primitives::CandleStyle::Renko { brick_size };
+        self.state.options.candle_style =
+            kestrel_loom::primitives::CandleStyle::Renko { brick_size };
         self.state.mark_dirty();
         Ok(())
     }

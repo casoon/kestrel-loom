@@ -58,14 +58,10 @@ impl BarIndex {
         }
 
         // First entry whose timestamp >= start
-        let first = self
-            .entries
-            .partition_point(|&(t, _)| t < start);
+        let first = self.entries.partition_point(|&(t, _)| t < start);
 
         // First entry whose timestamp > end
-        let last = self
-            .entries
-            .partition_point(|&(t, _)| t <= end);
+        let last = self.entries.partition_point(|&(t, _)| t <= end);
 
         if first >= last {
             return (0, 0);
@@ -229,7 +225,10 @@ mod tests {
         for bar_index in 3usize..20 {
             let x = mapper.bar_to_x(bar_index);
             let recovered = mapper.x_to_bar(x);
-            assert_eq!(recovered, bar_index as i64, "round-trip failed for bar {bar_index}");
+            assert_eq!(
+                recovered, bar_index as i64,
+                "round-trip failed for bar {bar_index}"
+            );
         }
     }
 }

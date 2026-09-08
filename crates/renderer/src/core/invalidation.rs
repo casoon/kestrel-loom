@@ -319,7 +319,11 @@ impl LayeredInvalidation {
             RenderLayer::Candles,
             RenderLayer::Full,
         ];
-        LAYERS.iter().copied().rev().find(|&l| self.dirty[l as usize])
+        LAYERS
+            .iter()
+            .copied()
+            .rev()
+            .find(|&l| self.dirty[l as usize])
     }
 
     /// Returns true only when the Full layer is dirty.

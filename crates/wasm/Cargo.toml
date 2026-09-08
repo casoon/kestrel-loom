@@ -5,6 +5,7 @@ description = "wasm-bindgen-Fassade und Canvas-2D-Ausführung für kestrel-loom"
 edition.workspace = true
 rust-version.workspace = true
 repository.workspace = true
+license.workspace = true
 publish.workspace = true
 
 [lib]

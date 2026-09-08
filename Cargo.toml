@@ -6,7 +6,7 @@ members = ["crates/renderer", "crates/wasm"]
 edition = "2021"
 rust-version = "1.87"
 repository = "https://github.com/casoon/kestrel-loom"
-# Lizenz bewusst offen — siehe plan/00-konzept.md §6 (M0).
+license = "BUSL-1.1"
 publish = false
 
 [workspace.dependencies]

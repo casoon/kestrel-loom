@@ -5,11 +5,10 @@
 pub mod optimizations;
 mod renderer;
 
-
 pub use renderer::{
-    CandleData, DrawStyle, LineStyle, RenderCommand, Renderer, TextAlign, TextBaseline,
+    BatchRenderer, CandleData, DrawStyle, LineStyle, RenderCommand, Renderer, TextAlign,
+    TextBaseline,
 };
-
 
 pub use optimizations::{
     calculate_indicator_complexity, calculate_visible_count, cull_candles, should_render_detail,

@@ -41,6 +41,20 @@ cargo test -p kestrel-loom          # Kern, ohne Browser
 ./build-wasm.sh                     # WASM-Paket nach ./pkg
 ```
 
+## Examples
+
+Laufen alle ohne Browser:
+
+```sh
+cargo run -p kestrel-loom --example candles_and_viewport   # Kerzen, Viewport, Pixelabbildung
+cargo run -p kestrel-loom --example tools_to_commands      # Werkzeuge -> RenderCommand-Strom
+cargo run -p kestrel-loom --example state_roundtrip        # Zustand sichern und laden
+```
+
+`tools_to_commands` zeigt den Kern der Architektur: Werkzeuge schreiben in einen
+`&mut dyn Renderer`, der `BatchRenderer` sammelt daraus einen prüfbaren
+`RenderCommand`-Strom — ohne Canvas, ohne `web-sys`.
+
 ## Stand
 
 Kern und WASM-Fassade sind übernommen und lauffähig. Der eigentliche Zeichenablauf
@@ -50,5 +64,6 @@ Meilensteine liegen im (gitignorierten) `plan/`-Verzeichnis.
 
 ## Lizenz
 
-Noch nicht festgelegt — bewusst offen, siehe `plan/00-konzept.md` §6. Bis dahin
-`publish = false`.
+[BUSL-1.1](./LICENSE) — dieselben Parameter wie `kestrel-chartkit`: nicht-kommerzielle
+Nutzung frei, kommerzielle Nutzung erfordert eine Lizenz vom Licensor, Umstellung auf
+Apache-2.0 vier Jahre nach Veröffentlichung.

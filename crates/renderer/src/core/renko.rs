@@ -110,9 +110,7 @@ mod tests {
 
     #[test]
     fn test_up_bricks() {
-        let candles: Vec<Candle> = (0..=20)
-            .map(|i| make_candle(i, 100.0 + i as f64))
-            .collect();
+        let candles: Vec<Candle> = (0..=20).map(|i| make_candle(i, 100.0 + i as f64)).collect();
         let bricks = compute_renko(&candles, 5.0);
         // Should produce upward bricks
         assert!(!bricks.is_empty());
@@ -123,9 +121,7 @@ mod tests {
 
     #[test]
     fn test_down_bricks() {
-        let candles: Vec<Candle> = (0..=20)
-            .map(|i| make_candle(i, 120.0 - i as f64))
-            .collect();
+        let candles: Vec<Candle> = (0..=20).map(|i| make_candle(i, 120.0 - i as f64)).collect();
         let bricks = compute_renko(&candles, 5.0);
         assert!(!bricks.is_empty());
         for b in &bricks {

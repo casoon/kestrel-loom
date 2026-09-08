@@ -40,10 +40,10 @@ pub use panels::{
 
 pub use primitives::{Color, LineStyle, PlotConfig};
 
-pub use rendering::{DrawStyle, RenderCommand, Renderer, TextAlign, TextBaseline};
+pub use rendering::{BatchRenderer, DrawStyle, RenderCommand, Renderer, TextAlign, TextBaseline};
 
 pub mod prelude {
     pub use crate::core::*;
     pub use crate::primitives::*;
-    pub use crate::rendering::{DrawStyle, RenderCommand, Renderer};
+    pub use crate::rendering::{BatchRenderer, DrawStyle, RenderCommand, Renderer};
 }

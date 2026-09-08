@@ -741,7 +741,10 @@ mod tests {
 
         // With BullishStrong the per-candle drift should be positive on average
         let avg_drift: f64 = candles.windows(2).map(|w| w[1].c - w[0].c).sum::<f64>() / 99.0;
-        assert!(avg_drift > -5.0, "trend drift implausibly negative: {avg_drift:.4}");
+        assert!(
+            avg_drift > -5.0,
+            "trend drift implausibly negative: {avg_drift:.4}"
+        );
     }
 
     #[test]

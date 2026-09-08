@@ -298,7 +298,6 @@ pub struct BatchRenderer {
 }
 
 impl BatchRenderer {
-    #[allow(dead_code)]
     pub fn new(width: u32, height: u32) -> Self {
         Self {
             commands: Vec::new(),
@@ -322,7 +321,6 @@ impl BatchRenderer {
         self.commands.clear();
     }
 
-    #[allow(dead_code)]
     pub fn resize(&mut self, width: u32, height: u32) {
         self.width = width;
         self.height = height;
