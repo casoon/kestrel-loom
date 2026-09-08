@@ -24,12 +24,26 @@ pub enum CandleStyle {
 }
 
 /// Line style enumeration
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum LineStyle {
     #[default]
     Solid,
-    Dashed,
+    /// Strichlinie; die Maße sind in CSS-Pixeln gemeint.
+    Dashed {
+        dash_length: u32,
+        gap_length: u32,
+    },
     Dotted,
+}
+
+impl LineStyle {
+    /// Strichlinie mit den üblichen Maßen (5 px Strich, 5 px Lücke).
+    pub fn dashed() -> Self {
+        LineStyle::Dashed {
+            dash_length: 5,
+            gap_length: 5,
+        }
+    }
 }
 
 /// Plot configuration for visualization
@@ -59,7 +73,7 @@ impl PlotConfig {
     }
 
     pub fn dashed(mut self) -> Self {
-        self.line_style = LineStyle::Dashed;
+        self.line_style = LineStyle::dashed();
         self
     }
 

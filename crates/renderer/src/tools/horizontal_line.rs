@@ -1,5 +1,6 @@
 use super::{ChartTool, ToolNode, ToolType};
 use crate::core::Viewport;
+use crate::primitives::LineStyle;
 use crate::rendering::{Renderer, TextAlign, TextBaseline};
 use crate::Color;
 use serde::{Deserialize, Serialize};
@@ -13,13 +14,6 @@ pub struct HorizontalLine {
     style: LineStyle,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-pub enum LineStyle {
-    Solid,
-    Dashed,
-    Dotted,
-}
-
 impl HorizontalLine {
     pub fn new(id: String) -> Self {
         Self {
@@ -27,7 +21,7 @@ impl HorizontalLine {
             nodes: Vec::new(),
             color: Color::rgba(156, 39, 176, 1.0), // Purple
             width: 1.5,
-            style: LineStyle::Dashed,
+            style: LineStyle::dashed(),
         }
     }
 
@@ -37,7 +31,7 @@ impl HorizontalLine {
             nodes: vec![ToolNode::new(time, price)],
             color: Color::rgba(156, 39, 176, 1.0),
             width: 1.5,
-            style: LineStyle::Dashed,
+            style: LineStyle::dashed(),
         }
     }
 
@@ -82,7 +76,7 @@ impl ChartTool for HorizontalLine {
                     let width = viewport.dimensions.width as f64;
                     renderer.draw_line(0.0, y, width, y, self.color, self.width as f32);
                 }
-                LineStyle::Dashed => {
+                LineStyle::Dashed { .. } => {
                     self.draw_dashed_horizontal(renderer, viewport, y);
                 }
                 LineStyle::Dotted => {

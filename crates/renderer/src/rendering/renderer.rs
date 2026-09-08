@@ -3,7 +3,7 @@
 //! This trait defines all drawing operations needed by the chart.
 //! Different backends (Canvas 2D, WebGPU) implement this trait.
 
-use crate::primitives::Color;
+use crate::primitives::{Color, LineStyle};
 
 /// Text alignment
 #[derive(Debug, Clone, Copy)]
@@ -11,14 +11,6 @@ pub enum TextAlign {
     Left,
     Center,
     Right,
-}
-
-/// Line style for indicators and drawings
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LineStyle {
-    Solid,
-    Dashed { dash_length: u32, gap_length: u32 },
-    Dotted,
 }
 
 /// Text baseline

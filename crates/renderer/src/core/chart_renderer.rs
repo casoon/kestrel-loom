@@ -325,7 +325,7 @@ pub fn render_chart(state: &mut ChartState, extras: &RenderExtras, renderer: &mu
         state.viewport.dimensions.width as f64,
         main_height,
     );
-    render_selected_drawing_highlights(state, renderer);
+    render_selected_tool_highlights(state, renderer);
     renderer.clear_clip();
 
     // Draw crosshair with pixel-perfect rendering
@@ -566,8 +566,8 @@ fn render_footprint_candles(
     }
 }
 
-fn render_selected_drawing_highlights(state: &ChartState, renderer: &mut dyn Renderer) {
-    if state.selected_drawings.is_empty() {
+fn render_selected_tool_highlights(state: &ChartState, renderer: &mut dyn Renderer) {
+    if state.selected_tools.is_empty() {
         return;
     }
 
@@ -575,7 +575,7 @@ fn render_selected_drawing_highlights(state: &ChartState, renderer: &mut dyn Ren
     let fill = crate::primitives::Color::rgba(88, 166, 255, 0.22);
 
     for tool in state.tool_manager.tools() {
-        if !state.selected_drawings.iter().any(|id| id == tool.id()) {
+        if !state.selected_tools.iter().any(|id| id == tool.id()) {
             continue;
         }
 

@@ -738,7 +738,7 @@ impl WasmChart {
     pub fn clear_tools(&mut self) -> Result<(), JsValue> {
         self._push_undo();
         self.state.tool_manager.clear();
-        self.state.selected_drawings.clear();
+        self.state.selected_tools.clear();
         self.state.mark_dirty();
         Ok(())
     }
@@ -864,7 +864,7 @@ impl WasmChart {
 
         let Some(id) = hit_id else {
             if !additive {
-                self.state.selected_drawings.clear();
+                self.state.selected_tools.clear();
                 self.state.mark_dirty();
             }
             return false;
@@ -873,16 +873,16 @@ impl WasmChart {
         if additive {
             if let Some(pos) = self
                 .state
-                .selected_drawings
+                .selected_tools
                 .iter()
                 .position(|selected| selected == &id)
             {
-                self.state.selected_drawings.remove(pos);
+                self.state.selected_tools.remove(pos);
             } else {
-                self.state.selected_drawings.push(id);
+                self.state.selected_tools.push(id);
             }
         } else {
-            self.state.selected_drawings = vec![id];
+            self.state.selected_tools = vec![id];
         }
         self.state.mark_dirty();
         true
@@ -904,7 +904,7 @@ impl WasmChart {
         let bottom = y1.max(y2);
 
         let mut selected = if additive {
-            self.state.selected_drawings.clone()
+            self.state.selected_tools.clone()
         } else {
             Vec::new()
         };
@@ -923,15 +923,15 @@ impl WasmChart {
             }
         }
 
-        self.state.selected_drawings = selected;
+        self.state.selected_tools = selected;
         self.state.mark_dirty();
-        self.get_selected_drawings()
+        self.get_selected_tools()
     }
 
     /// Start bulk-dragging selected drawings from a canvas position.
     #[wasm_bindgen(js_name = startSelectedDrawingsDrag)]
-    pub fn start_selected_drawings_drag(&mut self, x: f64, y: f64) -> bool {
-        if self.state.selected_drawings.is_empty() {
+    pub fn start_selected_tools_drag(&mut self, x: f64, y: f64) -> bool {
+        if self.state.selected_tools.is_empty() {
             return false;
         }
         self._push_undo();
@@ -944,7 +944,7 @@ impl WasmChart {
 
     /// Move all selected drawings to follow the current canvas position.
     #[wasm_bindgen(js_name = dragSelectedDrawingsTo)]
-    pub fn drag_selected_drawings_to(&mut self, x: f64, y: f64) {
+    pub fn drag_selected_tools_to(&mut self, x: f64, y: f64) {
         let Some((last_time, last_price)) = self.drawing_drag_anchor else {
             return;
         };
@@ -954,37 +954,37 @@ impl WasmChart {
         let dp = next_price - last_price;
         self.state
             .tool_manager
-            .move_many(&self.state.selected_drawings, dt, dp);
+            .move_many(&self.state.selected_tools, dt, dp);
         self.drawing_drag_anchor = Some((next_time, next_price));
         self.state.mark_dirty();
     }
 
     /// End a bulk drawing drag.
     #[wasm_bindgen(js_name = endSelectedDrawingsDrag)]
-    pub fn end_selected_drawings_drag(&mut self) {
+    pub fn end_selected_tools_drag(&mut self) {
         self.drawing_drag_anchor = None;
     }
 
     /// Delete all selected drawings as one undoable operation.
     #[wasm_bindgen(js_name = deleteSelectedDrawings)]
-    pub fn delete_selected_drawings(&mut self) -> usize {
-        if self.state.selected_drawings.is_empty() {
+    pub fn delete_selected_tools(&mut self) -> usize {
+        if self.state.selected_tools.is_empty() {
             return 0;
         }
         self._push_undo();
         let deleted = self
             .state
             .tool_manager
-            .remove_many(&self.state.selected_drawings);
-        self.state.selected_drawings.clear();
+            .remove_many(&self.state.selected_tools);
+        self.state.selected_tools.clear();
         self.state.mark_dirty();
         deleted
     }
 
     /// Return selected drawing IDs as JSON.
     #[wasm_bindgen(js_name = getSelectedDrawings)]
-    pub fn get_selected_drawings(&self) -> String {
-        serde_json::to_string(&self.state.selected_drawings).unwrap_or_else(|_| "[]".to_string())
+    pub fn get_selected_tools(&self) -> String {
+        serde_json::to_string(&self.state.selected_tools).unwrap_or_else(|_| "[]".to_string())
     }
 
     /// Create or replace an indicator pane. Returns the pane ID.

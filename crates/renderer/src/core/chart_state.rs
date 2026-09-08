@@ -107,7 +107,7 @@ pub struct ChartState {
     pub interaction: InteractionState,
     pub timeframe: Timeframe,
     pub tool_manager: crate::tools::ToolManager,
-    pub selected_drawings: Vec<String>,
+    pub selected_tools: Vec<String>,
     pub magnet_mode: MagnetMode,
     dirty: bool,
 }
@@ -125,7 +125,7 @@ impl ChartState {
             interaction: InteractionState::default(),
             timeframe,
             tool_manager: crate::tools::ToolManager::new(),
-            selected_drawings: Vec::new(),
+            selected_tools: Vec::new(),
             magnet_mode: MagnetMode::Off,
             dirty: true,
         }

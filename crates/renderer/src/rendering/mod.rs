@@ -5,9 +5,9 @@
 pub mod optimizations;
 mod renderer;
 
+pub use crate::primitives::LineStyle;
 pub use renderer::{
-    BatchRenderer, CandleData, DrawStyle, LineStyle, RenderCommand, Renderer, TextAlign,
-    TextBaseline,
+    BatchRenderer, CandleData, DrawStyle, RenderCommand, Renderer, TextAlign, TextBaseline,
 };
 
 pub use optimizations::{
