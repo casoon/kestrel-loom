@@ -411,7 +411,7 @@ mod tests {
 
         // Add 3 panels: Chart (3x), RSI (1x), MACD (1x)
         let chart = PanelConfig::new_chart();
-        let chart_id = chart.id;
+        let _chart_id = chart.id;
         manager.add_panel(chart, None);
 
         let rsi = PanelConfig::new_indicator("rsi14", serde_json::json!({"period": 14}));

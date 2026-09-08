@@ -145,6 +145,9 @@ pub enum RenderCommand {
 }
 
 /// Renderer trait - All backends must implement this
+// Zeichenfunktionen nehmen Koordinaten, Maße und Stil einzeln entgegen — das sind
+// mehr als sieben Parameter, ohne dass ein Sammeltyp die Sache lesbarer machen würde.
+#[allow(clippy::too_many_arguments)]
 pub trait Renderer {
     /// Begin a new frame
     fn begin_frame(&mut self);
@@ -305,7 +308,6 @@ impl BatchRenderer {
             height,
         }
     }
-    #[allow(dead_code)]
 
     pub fn add_command(&mut self, cmd: RenderCommand) {
         self.commands.push(cmd);
@@ -466,5 +468,90 @@ impl Renderer for BatchRenderer {
 
     fn dimensions(&self) -> (u32, u32) {
         (self.width, self.height)
+    }
+}
+
+#[cfg(test)]
+mod batch_renderer_tests {
+    use super::*;
+
+    fn red() -> Color {
+        Color::rgb(255, 0, 0)
+    }
+
+    #[test]
+    fn records_commands_in_order() {
+        let mut r = BatchRenderer::new(100, 50);
+        r.begin_frame();
+        r.clear(red());
+        r.draw_line(0.0, 0.0, 10.0, 10.0, red(), 1.0);
+        r.draw_circle(5.0, 5.0, 2.0, red());
+        r.end_frame();
+
+        let kinds: Vec<&str> = r
+            .commands()
+            .iter()
+            .map(|c| match c {
+                RenderCommand::Clear { .. } => "clear",
+                RenderCommand::Line { .. } => "line",
+                RenderCommand::Circle { .. } => "circle",
+                _ => "other",
+            })
+            .collect();
+        assert_eq!(kinds, ["clear", "line", "circle"]);
+    }
+
+    #[test]
+    fn begin_frame_drops_the_previous_frame() {
+        let mut r = BatchRenderer::new(100, 50);
+        r.draw_line(0.0, 0.0, 1.0, 1.0, red(), 1.0);
+        assert_eq!(r.commands().len(), 1);
+
+        r.begin_frame();
+        assert!(
+            r.commands().is_empty(),
+            "ein neuer Frame startet mit leerem Strom"
+        );
+    }
+
+    #[test]
+    fn vertical_line_becomes_a_line_command() {
+        let mut r = BatchRenderer::new(100, 50);
+        r.draw_vertical_line(7.0, 0.0, 50.0, &red(), 2.0);
+
+        match &r.commands()[0] {
+            RenderCommand::Line {
+                x1,
+                y1,
+                x2,
+                y2,
+                width,
+                ..
+            } => {
+                assert_eq!((*x1, *x2), (7.0, 7.0), "senkrecht: gleiche x");
+                assert_eq!((*y1, *y2), (0.0, 50.0));
+                assert_eq!(*width, 2.0);
+            }
+            other => panic!("unerwarteter Befehl: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ellipse_carries_fill_and_stroke_separately() {
+        let mut r = BatchRenderer::new(100, 50);
+        r.fill_ellipse(10.0, 10.0, 4.0, 2.0, red());
+        r.stroke_ellipse(10.0, 10.0, 4.0, 2.0, red(), 1.5);
+
+        match (&r.commands()[0], &r.commands()[1]) {
+            (
+                RenderCommand::Ellipse { style: fill, .. },
+                RenderCommand::Ellipse { style: stroke, .. },
+            ) => {
+                assert!(fill.fill_color.is_some() && fill.stroke_color.is_none());
+                assert!(stroke.stroke_color.is_some() && stroke.fill_color.is_none());
+                assert_eq!(stroke.line_width, 1.5);
+            }
+            other => panic!("unerwartete Befehle: {other:?}"),
+        }
     }
 }

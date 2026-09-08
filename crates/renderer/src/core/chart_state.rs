@@ -76,8 +76,9 @@ impl Default for CrosshairState {
 }
 
 /// Interaction state for tracking mouse/touch input
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub enum InteractionState {
+    #[default]
     Idle,
     Panning {
         start_x: f64,
@@ -95,12 +96,6 @@ pub enum InteractionState {
         start_x: f64,                  // X coordinate from start
         initial_time_range: TimeRange, // Snapshot of time range
     },
-}
-
-impl Default for InteractionState {
-    fn default() -> Self {
-        Self::Idle
-    }
 }
 
 /// Main chart state container
@@ -246,7 +241,7 @@ impl ChartState {
     /// Find closest candle to a given x coordinate
     pub fn candle_at_x(&self, x: f64) -> Option<&Candle> {
         let time = self.viewport.x_to_time(x);
-        let bar_duration = self.timeframe.duration_ms() / 1000;
+        let bar_duration = self.timeframe.duration_secs();
 
         // Find closest candle within half bar width
         self.candles
@@ -261,12 +256,10 @@ impl ChartState {
 
         self.visible_candles().into_iter().find(|candle| {
             let candle_x = self.viewport.time_to_x(candle.time);
-            let open_y = self.viewport.price_to_y(candle.o);
             let high_y = self.viewport.price_to_y(candle.h);
             let low_y = self.viewport.price_to_y(candle.l);
-            let close_y = self.viewport.price_to_y(candle.c);
 
-            candle.in_range(x, y, candle_x, bar_width, open_y, high_y, low_y, close_y)
+            candle.in_range(x, y, candle_x, bar_width, high_y, low_y)
         })
     }
 

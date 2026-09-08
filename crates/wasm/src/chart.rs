@@ -1256,7 +1256,7 @@ impl WasmChart {
         // Draw session markers (rendered behind candles — drawn before tools)
         if self.state.options.show_sessions && !self.state.options.sessions.is_empty() {
             let vp = &self.state.viewport;
-            let tf_secs = self.state.timeframe.duration_ms() as i64 / 1000;
+            let tf_secs = self.state.timeframe.duration_secs();
             // Only show session markers for timeframes <= 1h (3600s)
             if tf_secs <= 3600 {
                 let chart_width = vp.dimensions.width as f64;

@@ -25,14 +25,14 @@ impl MarketType {
     pub fn is_market_open(&self, timestamp: i64) -> bool {
         use chrono::{DateTime, Datelike, Timelike, Utc};
 
-        let dt = DateTime::<Utc>::from_timestamp(timestamp / 1000, 0).unwrap();
+        let dt = DateTime::<Utc>::from_timestamp(timestamp, 0).unwrap();
         let weekday = dt.weekday().num_days_from_monday();
         let hour = dt.hour();
 
         match self {
             MarketType::Stock => {
                 // Monday-Friday, 9:30-16:00 EST (simplified, no holidays)
-                weekday < 5 && hour >= 14 && hour < 21 // UTC approximation
+                weekday < 5 && (14..21).contains(&hour) // UTC approximation
             }
             MarketType::Forex => {
                 // 24/5 - Sunday evening to Friday evening
@@ -48,7 +48,7 @@ impl MarketType {
             }
             MarketType::Commodities => {
                 // Similar to futures but more restricted hours
-                weekday < 5 && (hour >= 8 && hour < 20)
+                weekday < 5 && (8..20).contains(&hour)
             }
         }
     }
@@ -243,7 +243,7 @@ pub struct CandleGenerator {
 impl CandleGenerator {
     /// Create new generator
     pub fn new(config: GeneratorConfig) -> Self {
-        let start_time = 1_600_000_000_000; // Sep 2020 as default start
+        let start_time = 1_600_000_000; // Sep 2020 as default start (Unix-Sekunden)
         Self {
             current_price: config.initial_price,
             current_time: start_time,
@@ -268,8 +268,10 @@ impl CandleGenerator {
     }
 
     /// Generate next candle
+    // Fachlich „nächste Kerze erzeugen", kein Iterator: der Generator ist unendlich und zustandsbehaftet.
+    #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> Option<Candle> {
-        let tf_duration = self.config.timeframe.duration_ms();
+        let tf_duration = self.config.timeframe.duration_secs();
 
         // Skip to next market open if needed
         if self.config.include_gaps {
@@ -292,7 +294,7 @@ impl CandleGenerator {
             * self.config.volatility_regime.multiplier();
 
         // Scale volatility to timeframe
-        let tf_minutes = self.config.timeframe.duration_ms() as f64 / 60_000.0;
+        let tf_minutes = self.config.timeframe.duration_secs() as f64 / 60.0;
         let candle_vol =
             self.config.base_volatility * vol_multiplier * (tf_minutes / 1440.0).sqrt(); // Scale by sqrt(time)
 
@@ -337,7 +339,7 @@ impl CandleGenerator {
 
     /// Reset generator to initial state
     pub fn reset(&mut self) {
-        let start_time = 1_600_000_000_000;
+        let start_time = 1_600_000_000;
         self.current_price = self.config.initial_price;
         self.current_time = start_time;
         self.candle_start_time = start_time;
@@ -361,7 +363,7 @@ impl CandleGenerator {
     pub fn update_streaming_candle(&mut self) -> Option<Candle> {
         let current_candle = self.current_candle.as_ref()?.clone();
         let elapsed = self.current_time - self.candle_start_time;
-        let tf_duration = self.config.timeframe.duration_ms();
+        let tf_duration = self.config.timeframe.duration_secs();
 
         if elapsed >= tf_duration {
             // Finalize candle
@@ -375,7 +377,7 @@ impl CandleGenerator {
         let vol_multiplier = self.config.market_type.volatility_multiplier()
             * self.config.volatility_regime.multiplier();
 
-        let tf_minutes = self.config.timeframe.duration_ms() as f64 / 60_000.0;
+        let tf_minutes = self.config.timeframe.duration_secs() as f64 / 60.0;
         let candle_vol =
             self.config.base_volatility * vol_multiplier * (tf_minutes / 1440.0).sqrt();
 
@@ -412,7 +414,7 @@ impl CandleGenerator {
         let final_candle = self.current_candle.take()?;
 
         // Move to next candle period
-        self.current_time = self.candle_start_time + self.config.timeframe.duration_ms();
+        self.current_time = self.candle_start_time + self.config.timeframe.duration_secs();
 
         Some(final_candle)
     }

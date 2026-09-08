@@ -1,7 +1,6 @@
-#[cfg(all(target_arch = "wasm32", feature = "wasm"))]
-use js_sys;
-
-#[cfg(not(all(target_arch = "wasm32", feature = "wasm")))]
+/// Zeitquelle des Schedulers. Der Kern kennt keine Browser-API — unter WASM
+/// liefert `SystemTime` über die Standardbibliothek denselben Wert wie
+/// `Date.now()`.
 mod js_sys {
     pub struct Date;
     impl Date {
@@ -311,32 +310,14 @@ struct BatteryStatus {
     level: f64, // 0.0 to 1.0
 }
 
-/// Attempt to get battery status from browser API
-/// Returns None if battery API is not available or fails
+/// Batteriestatus, falls die Umgebung ihn meldet.
+///
+/// Liefert immer `None`: Der Kern fragt den Browser nicht selbst. Die Battery
+/// Status API ist zudem asynchron, ein synchroner Aufruf könnte sie ohnehin nicht
+/// lesen — die frühere WASM-Variante gab hier ebenfalls unbedingt `None` zurück.
+/// Wenn Batteriebewusstsein gebraucht wird, reicht die Fassade den Wert herein.
 fn get_battery_status() -> Option<BatteryStatus> {
-    // Try to access the Battery Status API
-    // Note: This API is deprecated in some browsers, so it may not be available
-
-    #[cfg(all(target_arch = "wasm32", feature = "wasm"))]
-    {
-        use wasm_bindgen::JsCast;
-
-        let window = web_sys::window()?;
-        let _navigator = window.navigator();
-
-        // Try to get battery via getBattery() promise
-        // This is asynchronous, so we can't easily get it here
-        // For now, return None - battery awareness can be added later
-        // with proper async handling
-
-        None
-    }
-
-    #[cfg(not(all(target_arch = "wasm32", feature = "wasm")))]
-    {
-        // Not running in WASM, no battery API
-        None
-    }
+    None
 }
 
 #[cfg(test)]
@@ -370,7 +351,7 @@ mod tests {
         scheduler.update_complexity(complexity);
 
         let factor = scheduler.calculate_complexity_factor();
-        assert!(factor >= 1.0 && factor < 2.0);
+        assert!((1.0..2.0).contains(&factor));
     }
 
     #[test]

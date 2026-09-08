@@ -13,21 +13,8 @@ fn main() {
         .with_trend(Trend::BullishMild);
     let mut generator = CandleGenerator::new(config);
 
-    // ACHTUNG Zeiteinheit: `Candle.time` ist als Unix-Sekunden dokumentiert, der
-    // Generator liefert aber Millisekunden. Bis das vereinheitlicht ist, wird hier
-    // umgerechnet — sonst rechnen `visible_bars`, `bar_width` und `zoom` um Faktor
-    // 1000 daneben. Siehe plan/05-befunde-zeiteinheit.md.
-    let candles = generator
-        .generate(120)
-        .into_iter()
-        .map(|mut c| {
-            c.time /= 1000;
-            c
-        })
-        .collect();
-
     let mut chart = Chart::new();
-    chart.load(candles);
+    chart.load(generator.generate(120));
 
     let (low, high) = chart.price_range().expect("Kerzen vorhanden");
     let (start, end) = chart.time_range().expect("Kerzen vorhanden");

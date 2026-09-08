@@ -20,13 +20,6 @@ pub struct DevicePixels(pub f64);
 pub struct PixelRatio(pub f64);
 
 impl PixelRatio {
-    /// Get the current device pixel ratio from the environment
-    #[cfg(feature = "wasm")]
-    pub fn from_window() -> Self {
-        let window = web_sys::window().expect("no global window");
-        PixelRatio(window.device_pixel_ratio())
-    }
-
     /// Create a pixel ratio with a specific value
     pub fn new(ratio: f64) -> Self {
         PixelRatio(ratio.max(1.0))

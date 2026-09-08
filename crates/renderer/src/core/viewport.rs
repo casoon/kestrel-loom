@@ -31,18 +31,13 @@ pub struct Dimensions {
 }
 
 /// Price scale display mode
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ViewportScaleMode {
+    #[default]
     Price,
     Log,
     Percent,
     Indexed,
-}
-
-impl Default for ViewportScaleMode {
-    fn default() -> Self {
-        ViewportScaleMode::Price
-    }
 }
 
 /// Viewport state
@@ -146,7 +141,7 @@ impl Viewport {
         // Clamp zoom levels
         let min_bars = 10;
         let max_bars = 5000;
-        let bar_duration = self.timeframe.duration_ms() / 1000;
+        let bar_duration = self.timeframe.duration_secs();
 
         let bars_in_view = new_range / bar_duration;
         if bars_in_view < min_bars || bars_in_view > max_bars {
@@ -218,17 +213,17 @@ impl Viewport {
     /// Get bar slot width in CSS pixels
     pub fn bar_width(&self) -> f64 {
         let time_range = (self.time.end - self.time.start) as f64;
-        let bar_duration = self.timeframe.duration_ms() as f64 / 1000.0;
+        let bar_duration = self.timeframe.duration_secs() as f64;
         let bars_visible = time_range / bar_duration;
 
         let base = self.dimensions.width as f64 / bars_visible;
-        (base + self.bar_spacing_extra).max(1.0).min(200.0)
+        (base + self.bar_spacing_extra).clamp(1.0, 200.0)
     }
 
     /// Get number of visible bars
     pub fn visible_bars(&self) -> usize {
         let time_range = (self.time.end - self.time.start) as f64;
-        let bar_duration = self.timeframe.duration_ms() as f64 / 1000.0;
+        let bar_duration = self.timeframe.duration_secs() as f64;
 
         (time_range / bar_duration).ceil() as usize
     }
@@ -407,5 +402,79 @@ mod tests {
         let new_range = vp.time.end - vp.time.start;
         // After zoom-in, range should be half (≈ 360_000s = 100 bars, well above 10-bar min)
         assert_eq!(new_range, 360_000);
+    }
+}
+
+#[cfg(test)]
+mod unit_consistency_tests {
+    use super::*;
+    use crate::core::{CandleGenerator, GeneratorConfig, Timeframe};
+
+    /// Regression: Generator, `Candle.time` und die Viewport-Rechnungen müssen
+    /// dieselbe Zeiteinheit (Unix-Sekunden) benutzen. Vorher lieferte der Generator
+    /// Millisekunden — `visible_bars` war dadurch um Faktor 1000 zu hoch,
+    /// `bar_width` auf 1 px geklemmt und `zoom` wirkungslos.
+    #[test]
+    fn generator_and_viewport_share_the_time_unit() {
+        let tf = Timeframe::M5;
+        let mut generator =
+            CandleGenerator::new(GeneratorConfig::crypto().with_seed(1).with_timeframe(tf));
+        let candles = generator.generate(100);
+
+        let step = candles[1].time - candles[0].time;
+        assert_eq!(
+            step,
+            tf.duration_secs(),
+            "Generator-Schrittweite muss der Timeframe-Dauer in Sekunden entsprechen"
+        );
+
+        let mut viewport = Viewport::new(800, 400);
+        viewport.timeframe = tf;
+        viewport.fit_to_data(
+            TimeRange {
+                start: candles[0].time,
+                end: candles[candles.len() - 1].time,
+            },
+            PriceRange {
+                min: 90.0,
+                max: 110.0,
+            },
+        );
+
+        // Ohne Einheitenfehler liegt die Schätzung in der Größenordnung der Kerzenzahl.
+        let visible = viewport.visible_bars();
+        assert!(
+            (50..=200).contains(&visible),
+            "visible_bars() = {visible}, erwartet in der Größenordnung von 100"
+        );
+        assert!(
+            viewport.bar_width() > 1.0,
+            "bar_width() darf nicht auf das Minimum geklemmt sein"
+        );
+    }
+
+    #[test]
+    fn zoom_actually_changes_the_time_range() {
+        let mut viewport = Viewport::new(800, 400);
+        viewport.timeframe = Timeframe::M5;
+        viewport.fit_to_data(
+            TimeRange {
+                start: 1_600_000_000,
+                end: 1_600_030_000,
+            },
+            PriceRange {
+                min: 90.0,
+                max: 110.0,
+            },
+        );
+
+        let before = viewport.time_end() - viewport.time_start();
+        viewport.zoom(0.5, None);
+        let after = viewport.time_end() - viewport.time_start();
+
+        assert!(
+            after < before,
+            "zoom(0.5) muss das Zeitfenster verkleinern (vorher {before}, nachher {after})"
+        );
     }
 }

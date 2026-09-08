@@ -101,6 +101,16 @@ impl BarCoordMapper {
     pub fn x_to_bar(&self, x: f64) -> i64 {
         ((x - self.bar_width / 2.0) / self.bar_width) as i64 + self.offset
     }
+
+    /// Anzahl Bars, die auf die Zeichenfläche passen — anders als
+    /// `Viewport::visible_bars` unabhängig von Zeitstempeln und damit auch bei
+    /// Handelspausen korrekt.
+    pub fn visible_bars(&self) -> usize {
+        if self.bar_width <= 0.0 {
+            return 0;
+        }
+        (self.canvas_width as f64 / self.bar_width).ceil() as usize
+    }
 }
 
 #[cfg(test)]

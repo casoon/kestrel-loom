@@ -121,19 +121,17 @@ impl DrawingRenderer {
         let mut y2 = viewport.price_to_y(p2.price);
 
         // Extend line if requested
-        if drawing.style.extend_left || drawing.style.extend_right {
-            if (x2 - x1).abs() > 0.001 {
-                let slope = (y2 - y1) / (x2 - x1);
+        if (drawing.style.extend_left || drawing.style.extend_right) && (x2 - x1).abs() > 0.001 {
+            let slope = (y2 - y1) / (x2 - x1);
 
-                if drawing.style.extend_left {
-                    y1 = y2 - slope * (x2 - 0.0);
-                    x1 = 0.0;
-                }
+            if drawing.style.extend_left {
+                y1 = y2 - slope * (x2 - 0.0);
+                x1 = 0.0;
+            }
 
-                if drawing.style.extend_right {
-                    y2 = y1 + slope * (viewport.width - x1);
-                    x2 = viewport.width;
-                }
+            if drawing.style.extend_right {
+                y2 = y1 + slope * (viewport.width - x1);
+                x2 = viewport.width;
             }
         }
 

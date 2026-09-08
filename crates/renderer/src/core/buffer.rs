@@ -19,11 +19,6 @@ impl ChartBuffer {
         }
     }
 
-    /// Create buffer with default capacity (2000 candles)
-    pub fn default() -> Self {
-        Self::new(2000)
-    }
-
     /// Push a new candle to the buffer
     /// If buffer is full, removes the oldest candle
     pub fn push(&mut self, candle: Candle) {

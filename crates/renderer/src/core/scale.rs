@@ -164,6 +164,8 @@ impl PriceScale {
     }
 
     /// Convert an internal-space value back to price space.
+    // „from_internal" beschreibt die Richtung der Umrechnung, nicht eine Konstruktion.
+    #[allow(clippy::wrong_self_convention)]
     fn from_internal(&self, v: f64) -> f64 {
         match self.mode {
             ScaleMode::Linear => v,
@@ -318,7 +320,7 @@ mod tests {
         assert!(!ticks.is_empty());
         // All ticks within [42000, 44000]
         for &t in &ticks {
-            assert!(t >= 42000.0 && t <= 44000.0, "tick out of range: {t}");
+            assert!((42000.0..=44000.0).contains(&t), "tick out of range: {t}");
         }
     }
 

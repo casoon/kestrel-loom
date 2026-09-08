@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: Test & Verification Suite
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+          targets: wasm32-unknown-unknown
+
+      - name: Cargo Format Check
+        run: cargo fmt --all -- --check
+
+      - name: Cargo Clippy Check
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Run All Workspace Tests
+        run: cargo test --workspace
+
+      # Kernanforderung A1: der Renderer-Kern darf keine Browser-API kennen.
+      # Als Prüfung, nicht als Vorsatz — sonst gilt sie in drei Monaten nicht mehr.
+      - name: Core Stays Browser-Free
+        run: |
+          if cargo tree -p kestrel-loom | grep -E 'web-sys|js-sys|wasm-bindgen'; then
+            echo "::error::kestrel-loom hat eine Browser-Abhängigkeit bekommen (siehe plan/06-anforderungen.md, A1)"
+            exit 1
+          fi
+          echo "kestrel-loom ist browserfrei."
+
+      - name: Build for wasm32
+        run: cargo build -p kestrel-loom-wasm --target wasm32-unknown-unknown
+
+      - name: Install wasm-pack
+        uses: jetli/wasm-pack-action@v0.4.0
+
+      - name: WASM Package Smoke Build
+        run: ./build-wasm.sh
+
+      - name: Benchmarks Compile And Run Once
+        run: cargo bench --workspace -- --test
+
+      - name: Strict Rustdoc Build
+        run: RUSTDOCFLAGS='-D warnings' cargo doc --workspace --no-deps
+
+  benchmark:
+    name: Benchmark Suite
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Run Benchmark Suite
+        run: cargo bench -p kestrel-loom
+
+      - name: Upload Criterion Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: criterion-report
+          path: target/criterion
+          retention-days: 30

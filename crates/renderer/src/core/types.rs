@@ -84,18 +84,18 @@ impl Candle {
         }
     }
 
-    /// Check if a point (x, y) is within the candle bounds
-    /// Based on chartjs-chart-financial inRange logic
+    /// Liegt der Punkt (x, y) innerhalb der Kerze?
+    ///
+    /// Getroffen wird die volle Höhe inklusive Dochte — `open`/`close` spielen für
+    /// den Treffertest daher keine Rolle und sind nicht Teil der Signatur.
     pub fn in_range(
         &self,
         x: f64,
         y: f64,
         candle_x: f64,
         candle_width: f64,
-        open_y: f64,
         high_y: f64,
         low_y: f64,
-        close_y: f64,
     ) -> bool {
         let half_width = candle_width / 2.0;
         let left = candle_x - half_width;
@@ -211,6 +211,8 @@ impl Timeframe {
         }
     }
 
+    // Bewusst Option statt FromStr: unbekannte Timeframes sind kein Fehlerfall, sondern „nicht unterstützt".
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Option<Self> {
         match s {
             "1s" => Some(Timeframe::S1),
@@ -234,25 +236,31 @@ impl Timeframe {
     }
 
     /// Get timeframe duration in milliseconds
-    pub fn duration_ms(&self) -> i64 {
+    pub fn duration_secs(&self) -> i64 {
         match self {
-            Timeframe::S1 => 1_000,
-            Timeframe::S5 => 5_000,
-            Timeframe::S15 => 15_000,
-            Timeframe::S30 => 30_000,
-            Timeframe::M1 => 60_000,
-            Timeframe::M5 => 300_000,
-            Timeframe::M15 => 900_000,
-            Timeframe::M30 => 1_800_000,
-            Timeframe::H1 => 3_600_000,
-            Timeframe::H2 => 7_200_000,
-            Timeframe::H4 => 14_400_000,
-            Timeframe::H6 => 21_600_000,
-            Timeframe::H12 => 43_200_000,
-            Timeframe::D1 => 86_400_000,
-            Timeframe::W1 => 604_800_000,
-            Timeframe::MN1 => 2_592_000_000, // Approximate 30 days
+            Timeframe::S1 => 1,
+            Timeframe::S5 => 5,
+            Timeframe::S15 => 15,
+            Timeframe::S30 => 30,
+            Timeframe::M1 => 60,
+            Timeframe::M5 => 300,
+            Timeframe::M15 => 900,
+            Timeframe::M30 => 1800,
+            Timeframe::H1 => 3600,
+            Timeframe::H2 => 7200,
+            Timeframe::H4 => 14400,
+            Timeframe::H6 => 21600,
+            Timeframe::H12 => 43200,
+            Timeframe::D1 => 86400,
+            Timeframe::W1 => 604800,
+            Timeframe::MN1 => 2592000, // Approximate 30 days
         }
+    }
+
+    /// Dauer in Millisekunden. Abgeleitet aus [`Timeframe::duration_secs`] — die
+    /// Zeitachse des Charts rechnet durchgehend in Sekunden.
+    pub fn duration_ms(&self) -> i64 {
+        self.duration_secs() * 1000
     }
 }
 

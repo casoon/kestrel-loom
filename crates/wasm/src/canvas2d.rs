@@ -4,8 +4,6 @@ use wasm_bindgen::prelude::*;
 
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement};
 
-use js_sys;
-
 use kestrel_loom::canvas::{BitmapSpace, CssPixels, DevicePixels, MediaSpace, PixelRatio};
 use kestrel_loom::primitives::Color;
 use kestrel_loom::rendering::{RenderCommand, Renderer, TextAlign, TextBaseline};
@@ -189,7 +187,7 @@ impl Canvas2DRenderer {
                     b: 68,
                     a: 1.0,
                 };
-                let candle_color = if is_bullish {
+                let _candle_color = if is_bullish {
                     bullish_color
                 } else {
                     bearish_color
@@ -507,6 +505,7 @@ impl Renderer for Canvas2DRenderer {
 // Additional rendering methods for Canvas2DRenderer
 impl Canvas2DRenderer {
     /// Draw OHLC bar (Open-High-Low-Close)
+    #[allow(clippy::too_many_arguments)] // Zeichenparameter, kein Sammeltyp nötig
     pub fn draw_ohlc(
         &mut self,
         x: f64,
@@ -543,6 +542,7 @@ impl Canvas2DRenderer {
     }
 
     /// Draw hollow candlestick (outline only)
+    #[allow(clippy::too_many_arguments)] // Zeichenparameter, kein Sammeltyp nötig
     pub fn draw_hollow_candle(
         &mut self,
         x: f64,
@@ -689,6 +689,7 @@ impl Canvas2DRenderer {
     }
 
     /// Draw text in media space (CSS coordinates) with DPI-aware font sizing
+    #[allow(clippy::too_many_arguments)] // Zeichenparameter, kein Sammeltyp nötig
     pub fn draw_text_media(
         &mut self,
         text: &str,

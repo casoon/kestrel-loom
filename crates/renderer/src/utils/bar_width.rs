@@ -1,7 +1,7 @@
-/// Optimal bar width calculation inspired by TradingView Lightweight Charts
-///
-/// These functions calculate pixel-perfect bar widths that look good at any zoom level
-/// and properly account for device pixel ratio.
+//! Optimal bar width calculation inspired by TradingView Lightweight Charts.
+//!
+//! These functions calculate pixel-perfect bar widths that look good at any zoom level
+//! and properly account for device pixel ratio.
 
 /// Calculate optimal bar width for OHLC bars
 ///
@@ -23,7 +23,7 @@ pub fn optimal_candlestick_width(bar_spacing: f64, pixel_ratio: f64) -> f64 {
     const SPECIAL_CASE_TO: f64 = 4.0;
     const SPECIAL_CASE_COEFF: f64 = 3.0;
 
-    if bar_spacing >= SPECIAL_CASE_FROM && bar_spacing <= SPECIAL_CASE_TO {
+    if (SPECIAL_CASE_FROM..=SPECIAL_CASE_TO).contains(&bar_spacing) {
         return (SPECIAL_CASE_COEFF * pixel_ratio).floor();
     }
 

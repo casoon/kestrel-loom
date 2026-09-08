@@ -16,18 +16,8 @@ fn main() {
             .with_timeframe(Timeframe::M15),
     );
 
-    // Zeiteinheit angleichen — siehe plan/05-befunde-zeiteinheit.md.
-    let candles = generator
-        .generate(200)
-        .into_iter()
-        .map(|mut c| {
-            c.time /= 1000;
-            c
-        })
-        .collect();
-
     let mut state = ChartState::new(1200, 600, Timeframe::M15);
-    state.set_candles(candles);
+    state.set_candles(generator.generate(200));
     state.fit_to_data();
     state.zoom(0.5, None);
 

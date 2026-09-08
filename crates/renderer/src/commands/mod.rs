@@ -146,7 +146,7 @@ impl CommandHistory {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::drawings::drawing::Point;
+
     use crate::drawings::DrawingType;
 
     #[test]

@@ -145,6 +145,7 @@ impl<'a> FootprintRenderer<'a> {
     /// - `candle_width`: width in pixels of one candle slot
     /// - `y_for_price`: converts a price to a y pixel coordinate
     /// - `price_per_pixel`: how many price units fit in one pixel (zoom level)
+    #[allow(clippy::too_many_arguments)] // Zeichenparameter, kein Sammeltyp nötig
     pub fn render(
         &self,
         candles: &[FootprintCandle],

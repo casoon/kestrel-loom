@@ -4,10 +4,10 @@
 pub use crate::core::Point;
 
 /// Candle rendering style
-#[derive(Debug, Clone, Copy, PartialEq)]
-#[cfg_attr(feature = "wasm", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize, Default)]
 pub enum CandleStyle {
     /// Traditional candlestick with filled body
+    #[default]
     Candlestick,
     /// OHLC bars with horizontal ticks
     OHLC,
@@ -23,24 +23,13 @@ pub enum CandleStyle {
     Renko { brick_size: f64 },
 }
 
-impl Default for CandleStyle {
-    fn default() -> Self {
-        CandleStyle::Candlestick
-    }
-}
-
 /// Line style enumeration
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum LineStyle {
+    #[default]
     Solid,
     Dashed,
     Dotted,
-}
-
-impl Default for LineStyle {
-    fn default() -> Self {
-        LineStyle::Solid
-    }
 }
 
 /// Plot configuration for visualization
