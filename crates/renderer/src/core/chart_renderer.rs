@@ -154,13 +154,18 @@ pub fn render_chart(state: &mut ChartState, extras: &RenderExtras, renderer: &mu
 
         let candle_style = state.options.candle_style;
 
-        // For Renko: transform candles first, then render as candlestick bricks
+        // Abgeleitete Serien (Renko, Heikin Ashi) werden vor dem Zeichnen
+        // umgerechnet; der Renderpfad danach ist derselbe.
         let renko_bricks: Vec<Candle>;
+        let heikin_ashi: Vec<Candle>;
         let owned_visible: Vec<Candle>;
         let render_candles: &[Candle] =
             if let crate::primitives::CandleStyle::Renko { brick_size } = candle_style {
                 renko_bricks = crate::core::renko::compute_renko(&state.candles, brick_size);
                 &renko_bricks
+            } else if candle_style == crate::primitives::CandleStyle::HeikinAshi {
+                heikin_ashi = crate::core::heikin_ashi::compute_heikin_ashi(&state.candles);
+                &heikin_ashi
             } else {
                 owned_visible = visible_candles.iter().map(|c| (*c).clone()).collect();
                 &owned_visible
@@ -266,7 +271,23 @@ pub fn render_chart(state: &mut ChartState, extras: &RenderExtras, renderer: &mu
                                 unchanged_color,
                             );
                         }
-                        _ => unreachable!(),
+                        // Heikin Ashi ist eine abgeleitete Serie: die Kerzen sind
+                        // bereits umgerechnet und werden ganz normal gezeichnet.
+                        // Vorher stand hier `unreachable!()` — eine neue Variante
+                        // von `CandleStyle` ließ den Renderer damit abstürzen.
+                        _ => {
+                            renderer.draw_candle(
+                                x,
+                                open_y,
+                                high_y,
+                                low_y,
+                                close_y,
+                                width,
+                                bullish_color,
+                                bearish_color,
+                                unchanged_color,
+                            );
+                        }
                     }
                 }
             }

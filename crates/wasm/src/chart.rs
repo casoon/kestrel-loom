@@ -409,6 +409,7 @@ impl WasmChart {
             "line" => kestrel_loom::primitives::CandleStyle::Line,
             "area" => kestrel_loom::primitives::CandleStyle::Area,
             "footprint" => kestrel_loom::primitives::CandleStyle::Footprint,
+            "heikinashi" | "heikin_ashi" => kestrel_loom::primitives::CandleStyle::HeikinAshi,
             s if s.starts_with("renko") => {
                 // Accept "renko" (default brick) or "renko:5.0"
                 let brick_size = if let Some(rest) = s.strip_prefix("renko:") {
@@ -420,7 +421,7 @@ impl WasmChart {
             }
             _ => {
                 return Err(JsValue::from_str(
-                    "Invalid candle style. Use: candlestick, ohlc, hollow, line, area, footprint, or renko[:brick_size]",
+                    "Invalid candle style. Use: candlestick, ohlc, hollow, line, area, heikinashi, footprint, or renko[:brick_size]",
                 ))
             }
         };

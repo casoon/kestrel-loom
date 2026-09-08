@@ -14,6 +14,7 @@ mod config;
 mod events;
 pub mod footprint;
 mod generator;
+pub mod heikin_ashi;
 
 mod invalidation;
 pub mod overlay;

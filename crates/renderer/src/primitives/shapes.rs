@@ -21,6 +21,8 @@ pub enum CandleStyle {
     Footprint,
     /// Renko bricks — each brick covers `brick_size` price units
     Renko { brick_size: f64 },
+    /// Heikin-Ashi candles — geglättete, abgeleitete Serie
+    HeikinAshi,
 }
 
 /// Line style enumeration

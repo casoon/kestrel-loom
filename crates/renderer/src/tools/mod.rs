@@ -104,8 +104,16 @@ impl ToolManager {
     }
 
     /// Add a new tool
+    /// Fügt ein Werkzeug hinzu — oder ersetzt das vorhandene mit derselben ID.
+    ///
+    /// Vorher sammelten sich Werkzeuge mit gleicher ID an, und `remove_tool`
+    /// entfernte danach nur eines von ihnen. Ersetzen ist dieselbe Semantik, die
+    /// `kestrel-chartkit` mit `Pane::upsert_object` für Szenenobjekte hat.
     pub fn add_tool(&mut self, tool: Box<dyn ChartTool>) {
-        self.tools.push(tool);
+        match self.tools.iter_mut().find(|t| t.id() == tool.id()) {
+            Some(existing) => *existing = tool,
+            None => self.tools.push(tool),
+        }
     }
 
     /// Get tool by ID
@@ -370,6 +378,30 @@ impl Default for ToolManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn adding_twice_with_the_same_id_replaces_instead_of_piling_up() {
+        let mut manager = ToolManager::new();
+
+        let mut first = horizontal_line::HorizontalLine::new("dup".to_string());
+        first.nodes_mut().push(ToolNode::new(0, 100.0));
+        manager.add_tool(Box::new(first));
+
+        let mut second = horizontal_line::HorizontalLine::new("dup".to_string());
+        second.nodes_mut().push(ToolNode::new(0, 102.0));
+        manager.add_tool(Box::new(second));
+
+        assert_eq!(manager.count(), 1, "eine ID, ein Werkzeug");
+        assert_eq!(
+            manager.get_tool("dup").map(|t| t.nodes()[0].price),
+            Some(102.0),
+            "das spätere Werkzeug gewinnt"
+        );
+
+        manager.remove_tool("dup");
+        assert_eq!(manager.count(), 0, "und es bleibt nichts zurück");
+    }
+
     use crate::core::{Candle, PriceRange, TimeRange, Viewport};
 
     fn make_viewport() -> Viewport {

@@ -446,3 +446,53 @@ fn an_overlay_does_not_shrink_the_main_chart() {
         "ein Pane verkleinert den Hauptchart ({pane} statt {plain})"
     );
 }
+
+/// Jede Darstellung muss zeichnen, ohne zu panieren.
+///
+/// Ein `unreachable!()` im Kerzen-Match ließ eine neu hinzugefügte
+/// `CandleStyle`-Variante den Renderer abstürzen — im Browser als leerer Chart
+/// sichtbar, in den Tests gar nicht, weil keiner alle Darstellungen durchging.
+#[test]
+fn every_candle_style_renders() {
+    let styles = [
+        "candlestick",
+        "ohlc",
+        "hollow",
+        "line",
+        "area",
+        "heikinashi",
+        "renko",
+        "footprint",
+    ];
+
+    for style in styles {
+        let mut generator = CandleGenerator::new(GeneratorConfig::crypto().with_seed(42));
+        let mut state = ChartState::new(800, 400, Timeframe::M5);
+        state.set_candles(generator.generate(120));
+        state.fit_to_data();
+        state.options.candle_style = parse_style(style);
+
+        let mut recorder = BatchRenderer::new(800, 400);
+        render_chart(&mut state, &RenderExtras::default(), &mut recorder);
+
+        assert!(
+            !recorder.commands().is_empty(),
+            "{style} hat nichts gezeichnet"
+        );
+    }
+}
+
+fn parse_style(name: &str) -> kestrel_loom::primitives::CandleStyle {
+    use kestrel_loom::primitives::CandleStyle;
+    match name {
+        "candlestick" => CandleStyle::Candlestick,
+        "ohlc" => CandleStyle::OHLC,
+        "hollow" => CandleStyle::Hollow,
+        "line" => CandleStyle::Line,
+        "area" => CandleStyle::Area,
+        "heikinashi" => CandleStyle::HeikinAshi,
+        "renko" => CandleStyle::Renko { brick_size: 0.5 },
+        "footprint" => CandleStyle::Footprint,
+        other => panic!("unbekannte Darstellung {other}"),
+    }
+}
