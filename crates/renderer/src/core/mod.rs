@@ -22,6 +22,7 @@ pub mod overlays;
 mod pane;
 pub mod renko;
 mod scale;
+pub mod scene;
 mod types;
 mod viewport;
 

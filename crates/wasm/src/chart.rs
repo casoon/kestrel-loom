@@ -610,6 +610,9 @@ impl WasmChart {
             indicator_panes: &self.indicator_panes,
             compare_symbols: &self.compare_symbols,
             footprint_candles: &self.footprint_candles,
+            // Szenen kommen noch nicht über die JS-Grenze — der Renderer kann sie
+            // bereits zeichnen (M4-Spike, siehe plan/02-chartkit-vertrag.md).
+            scene: None,
         };
 
         render_chart(&mut self.state, &extras, renderer);

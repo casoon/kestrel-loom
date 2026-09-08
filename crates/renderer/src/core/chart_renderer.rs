@@ -70,6 +70,9 @@ pub struct RenderExtras<'a> {
     pub indicator_panes: &'a [IndicatorPane],
     pub compare_symbols: &'a [CompareSymbol],
     pub footprint_candles: &'a [FootprintCandle],
+    /// Eine Chartkit-Szene, die über den Preischart gelegt wird (Zonen, Pivots,
+    /// Profile). Siehe [`crate::core::scene`].
+    pub scene: Option<&'a kestrel_chartkit::viz::scene::Scene>,
 }
 
 /// Zeichnet einen vollständigen Frame.
@@ -81,6 +84,7 @@ pub fn render_chart(state: &mut ChartState, extras: &RenderExtras, renderer: &mu
         indicator_panes,
         compare_symbols,
         footprint_candles,
+        scene,
     } = *extras;
 
     if !state.is_dirty() {
@@ -365,6 +369,10 @@ pub fn render_chart(state: &mut ChartState, extras: &RenderExtras, renderer: &mu
         main_height,
     );
     render_overlay_indicators(indicator_panes, state, renderer);
+
+    if let Some(scene) = scene {
+        crate::core::scene::render_scene(scene, state, renderer);
+    }
 
     render_compare_symbols(compare_symbols, state, renderer, main_height);
     renderer.clear_clip();
