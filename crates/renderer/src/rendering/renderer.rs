@@ -283,6 +283,52 @@ pub trait Renderer {
     }
 
     /// Set clipping region
+    /// Polyline through the given points (line/indicator series).
+    fn draw_polyline(&mut self, points: &[(f64, f64)], color: Color, width: f64);
+
+    /// Filled area between a polyline and a baseline, with a stroke on top.
+    fn draw_area(
+        &mut self,
+        points: &[(f64, f64)],
+        baseline_y: f64,
+        fill: Color,
+        stroke: Color,
+        width: f64,
+    );
+
+    /// Horizontal line across an x-range.
+    fn draw_horizontal_line(&mut self, y: f64, left: f64, right: f64, color: &Color, width: f64);
+
+    /// OHLC bar (open tick left, close tick right).
+    #[allow(clippy::too_many_arguments)]
+    fn draw_ohlc(
+        &mut self,
+        x: f64,
+        open_y: f64,
+        high_y: f64,
+        low_y: f64,
+        close_y: f64,
+        width: f64,
+        bullish_color: Color,
+        bearish_color: Color,
+        unchanged_color: Color,
+    );
+
+    /// Hollow candle (body outlined when bullish, filled when bearish).
+    #[allow(clippy::too_many_arguments)]
+    fn draw_hollow_candle(
+        &mut self,
+        x: f64,
+        open_y: f64,
+        high_y: f64,
+        low_y: f64,
+        close_y: f64,
+        width: f64,
+        bullish_color: Color,
+        bearish_color: Color,
+        unchanged_color: Color,
+    );
+
     fn set_clip(&mut self, x: f64, y: f64, width: f64, height: f64);
 
     /// Clear clipping region
@@ -294,6 +340,24 @@ pub trait Renderer {
 
 /// Batch renderer - Collects commands for efficient rendering
 #[allow(dead_code)]
+/// Farbe einer Kerze aus der Richtung. Die y-Achse ist invertiert, ein kleineres
+/// `close_y` bedeutet also einen höheren Schlusskurs.
+fn candle_color(
+    open_y: f64,
+    close_y: f64,
+    bullish: Color,
+    bearish: Color,
+    unchanged: Color,
+) -> Color {
+    if close_y < open_y {
+        bullish
+    } else if close_y > open_y {
+        bearish
+    } else {
+        unchanged
+    }
+}
+
 pub struct BatchRenderer {
     commands: Vec<RenderCommand>,
     width: u32,
@@ -374,6 +438,115 @@ impl Renderer for BatchRenderer {
                 stroke_color: Some(color),
                 fill_color: None,
                 line_width: width,
+            },
+        });
+    }
+
+    fn draw_polyline(&mut self, points: &[(f64, f64)], color: Color, width: f64) {
+        self.commands.push(RenderCommand::IndicatorLine {
+            points: points.to_vec(),
+            color,
+            width: width as f32,
+            style: LineStyle::Solid,
+        });
+    }
+
+    fn draw_area(
+        &mut self,
+        points: &[(f64, f64)],
+        baseline_y: f64,
+        fill: Color,
+        stroke: Color,
+        width: f64,
+    ) {
+        // Fläche als Polygon bis zur Grundlinie, danach die Kontur — dieselbe
+        // Zerlegung, die der Canvas-Renderer ausführt.
+        let mut polygon: Vec<(f64, f64)> = Vec::with_capacity(points.len() + 2);
+        if let Some(first) = points.first() {
+            polygon.push((first.0, baseline_y));
+        }
+        polygon.extend_from_slice(points);
+        if let Some(last) = points.last() {
+            polygon.push((last.0, baseline_y));
+        }
+        self.commands.push(RenderCommand::IndicatorLine {
+            points: polygon,
+            color: fill,
+            width: 0.0,
+            style: LineStyle::Solid,
+        });
+        self.draw_polyline(points, stroke, width);
+    }
+
+    fn draw_horizontal_line(&mut self, y: f64, left: f64, right: f64, color: &Color, width: f64) {
+        self.commands.push(RenderCommand::Line {
+            x1: left,
+            y1: y,
+            x2: right,
+            y2: y,
+            color: *color,
+            width: width as f32,
+        });
+    }
+
+    fn draw_ohlc(
+        &mut self,
+        x: f64,
+        open_y: f64,
+        high_y: f64,
+        low_y: f64,
+        close_y: f64,
+        width: f64,
+        bullish_color: Color,
+        bearish_color: Color,
+        unchanged_color: Color,
+    ) {
+        let color = candle_color(
+            open_y,
+            close_y,
+            bullish_color,
+            bearish_color,
+            unchanged_color,
+        );
+        let half = width / 2.0;
+        self.draw_line(x, high_y, x, low_y, color, 1.0);
+        self.draw_line(x - half, open_y, x, open_y, color, 1.0);
+        self.draw_line(x, close_y, x + half, close_y, color, 1.0);
+    }
+
+    fn draw_hollow_candle(
+        &mut self,
+        x: f64,
+        open_y: f64,
+        high_y: f64,
+        low_y: f64,
+        close_y: f64,
+        width: f64,
+        bullish_color: Color,
+        bearish_color: Color,
+        unchanged_color: Color,
+    ) {
+        let color = candle_color(
+            open_y,
+            close_y,
+            bullish_color,
+            bearish_color,
+            unchanged_color,
+        );
+        // Docht plus Körperkontur — im Befehlsstrom ist die Füllung die
+        // Unterscheidung, nicht ein eigener Befehlstyp.
+        self.draw_line(x, high_y, x, low_y, color, 1.0);
+        let top = open_y.min(close_y);
+        let height = (close_y - open_y).abs().max(1.0);
+        self.commands.push(RenderCommand::Rect {
+            x: x - width / 2.0,
+            y: top,
+            width,
+            height,
+            style: DrawStyle {
+                stroke_color: Some(color),
+                fill_color: None,
+                line_width: 1.0,
             },
         });
     }

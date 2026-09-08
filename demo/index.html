@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>kestrel-loom — Demo</title>
+    <style>
+      :root { color-scheme: dark; }
+      body {
+        margin: 0;
+        background: #0b0f14;
+        color: #c9d3df;
+        font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+      }
+      header {
+        display: flex; align-items: center; gap: 16px;
+        padding: 10px 16px; border-bottom: 1px solid #1b2530;
+      }
+      h1 { font-size: 14px; font-weight: 600; margin: 0; letter-spacing: .02em; }
+      .spacer { flex: 1; }
+      button, select {
+        background: #131a22; color: #c9d3df; border: 1px solid #22303d;
+        border-radius: 4px; padding: 4px 10px; font: inherit; cursor: pointer;
+      }
+      button:hover, select:hover { border-color: #35485a; }
+      #wrap { padding: 16px; }
+      canvas { display: block; width: 100%; height: 70vh; border: 1px solid #1b2530; border-radius: 6px; }
+      #status { padding: 8px 16px; color: #6f8496; border-top: 1px solid #1b2530; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>kestrel-loom</h1>
+      <select id="style">
+        <option value="candlestick">Candlestick</option>
+        <option value="ohlc">OHLC</option>
+        <option value="hollow">Hollow</option>
+        <option value="line">Line</option>
+        <option value="area">Area</option>
+        <option value="renko:0.5">Renko</option>
+      </select>
+      <button id="fit">Fit</button>
+      <button id="theme">Theme</button>
+      <div class="spacer"></div>
+      <span id="count"></span>
+    </header>
+    <div id="wrap"><canvas id="chart"></canvas></div>
+    <div id="status">lädt…</div>
+
+    <script type="module">
+      import init, { WasmChart } from '../pkg/kestrel_loom_wasm.js';
+
+      const status = document.getElementById('status');
+      const canvas = document.getElementById('chart');
+
+      // Deterministische Kerzen (xorshift), damit die Demo bei jedem Laden
+      // dasselbe zeigt — wie die Fixtures im Testpfad.
+      function candles(n, seed = 42) {
+        let s = seed >>> 0;
+        const rnd = () => {
+          s ^= s << 13; s >>>= 0;
+          s ^= s >> 17;
+          s ^= s << 5; s >>>= 0;
+          return s / 4294967296;
+        };
+        const out = [];
+        let price = 100;
+        let t = 1600000000; // Unix-Sekunden
+        for (let i = 0; i < n; i++) {
+          const drift = (rnd() - 0.48) * 0.9;
+          const o = price;
+          const c = Math.max(1, o + drift);
+          const h = Math.max(o, c) + rnd() * 0.5;
+          const l = Math.min(o, c) - rnd() * 0.5;
+          out.push({ time: t, o, h, l, c, v: 100 + rnd() * 900 });
+          price = c;
+          t += 300; // M5
+        }
+        return out;
+      }
+
+      try {
+        await init();
+
+        const dpr = window.devicePixelRatio || 1;
+        const rect = canvas.getBoundingClientRect();
+        canvas.width = Math.floor(rect.width * dpr);
+        canvas.height = Math.floor(rect.height * dpr);
+
+        const chart = new WasmChart(rect.width, rect.height, '5m');
+        chart.attachCanvas(canvas);
+
+        const data = candles(300);
+        chart.setCandles(JSON.stringify(data));
+        chart.fitToData();
+        chart.render();
+
+        document.getElementById('count').textContent = `${data.length} Kerzen`;
+        status.textContent = 'ok — Zoom mit dem Mausrad, Pan mit gedrückter Maustaste.';
+
+        const redraw = () => chart.render();
+
+        canvas.addEventListener('mousedown', (e) => {
+          const r = canvas.getBoundingClientRect();
+          chart.onMouseDown(e.clientX - r.left, e.clientY - r.top, 0);
+          redraw();
+        });
+        canvas.addEventListener('mousemove', (e) => {
+          const r = canvas.getBoundingClientRect();
+          chart.onMouseMove(e.clientX - r.left, e.clientY - r.top);
+          redraw();
+        });
+        window.addEventListener('mouseup', (e) => {
+          const r = canvas.getBoundingClientRect();
+          chart.onMouseUp(e.clientX - r.left, e.clientY - r.top, 0);
+          redraw();
+        });
+        canvas.addEventListener('wheel', (e) => {
+          e.preventDefault();
+          const r = canvas.getBoundingClientRect();
+          chart.onMouseWheel(e.clientX - r.left, e.clientY - r.top, e.deltaY);
+          redraw();
+        }, { passive: false });
+
+        document.getElementById('style').addEventListener('change', (e) => {
+          // Fehler nicht verschlucken — eine unbekannte Darstellung sähe sonst
+          // aus wie "nichts passiert".
+          try {
+            chart.setCandleStyle(e.target.value);
+            redraw();
+            status.textContent = 'Darstellung: ' + e.target.value;
+          } catch (err) {
+            status.textContent = 'setCandleStyle("' + e.target.value + '") abgelehnt: ' + err;
+          }
+        });
+        document.getElementById('fit').addEventListener('click', () => {
+          chart.fitToData();
+          redraw();
+        });
+        let dark = true;
+        document.getElementById('theme').addEventListener('click', () => {
+          dark = !dark;
+          chart.setTheme(dark);
+          redraw();
+        });
+
+        window.addEventListener('resize', () => {
+          const r = canvas.getBoundingClientRect();
+          canvas.width = Math.floor(r.width * dpr);
+          canvas.height = Math.floor(r.height * dpr);
+          chart.resize(r.width, r.height);
+          redraw();
+        });
+      } catch (err) {
+        status.textContent = 'Fehler: ' + err;
+        console.error(err);
+      }
+    </script>
+  </body>
+</html>

@@ -41,6 +41,18 @@ cargo test -p kestrel-loom          # Kern, ohne Browser
 ./build-wasm.sh                     # WASM-Paket nach ./pkg
 ```
 
+## Demo
+
+```sh
+./build-wasm.sh
+python3 -m http.server 8777      # dann http://localhost:8777/demo/
+```
+
+Eine kleine Seite mit deterministischen Kerzen: Darstellungswechsel
+(Candlestick, OHLC, Hollow, Line, Area, Renko), Zoom per Mausrad, Pan, Crosshair,
+Theme-Umschaltung. Sie ist bewusst klein gehalten — sie soll zeigen, dass die
+Kette Kern → WASM → Canvas trägt, und als Vorlage für die Einbindung dienen.
+
 ## Examples
 
 Laufen alle ohne Browser:
@@ -57,9 +69,9 @@ cargo run -p kestrel-loom --example state_roundtrip        # Zustand sichern und
 
 ## Stand
 
-Kern und WASM-Fassade sind übernommen und lauffähig. Der eigentliche Zeichenablauf
-liegt noch in der WASM-Fassade und wird als Nächstes in den Kern gezogen; die
-Indikator-Anbindung an `kestrel-chartkit` steht aus. Konzept, Übernahme-Inventar und
+Kern und WASM-Fassade sind übernommen, der Renderloop liegt im Kern und ein
+vollständiger Frame ist als Golden-Fixture ohne Browser prüfbar. Die Demo läuft.
+Offen ist die Indikator-Anbindung an `kestrel-chartkit`. Konzept, Übernahme-Inventar und
 Meilensteine liegen im (gitignorierten) `plan/`-Verzeichnis.
 
 ## Lizenz

@@ -12,7 +12,8 @@
 //! ```
 
 use kestrel_loom::core::{
-    CandleGenerator, GeneratorConfig, PriceRange, TimeRange, Timeframe, Viewport,
+    render_chart, CandleGenerator, ChartState, GeneratorConfig, PriceRange, RenderExtras,
+    TimeRange, Timeframe, Viewport,
 };
 use kestrel_loom::rendering::{cull_candles, DrawStyle};
 use kestrel_loom::tools::{ChartTool, HorizontalLine, ToolManager, ToolNode, TrendLine};
@@ -207,4 +208,84 @@ fn culling_keeps_only_visible_candles() {
         "nach dem Hineinzoomen müssen weniger Kerzen übrig bleiben ({zoomed} statt {all})"
     );
     assert!(zoomed > 0, "es darf nicht alles weggefiltert werden");
+}
+
+/// Ein vollständiger Frame — Hintergrund, Gitter, Kerzen, Achsen.
+///
+/// Vor der Verlagerung des Renderloops in den Kern war dieser Test nicht
+/// formulierbar: der Ablauf hing an `wasm-bindgen` und lief nur im Browser.
+#[test]
+fn a_full_frame_renders_to_a_stable_command_stream() {
+    let mut generator = CandleGenerator::new(
+        GeneratorConfig::crypto()
+            .with_seed(42)
+            .with_timeframe(Timeframe::M5),
+    );
+
+    let mut state = ChartState::new(800, 400, Timeframe::M5);
+    state.set_candles(generator.generate(150));
+    state.fit_to_data();
+
+    let mut recorder = BatchRenderer::new(800, 400);
+    render_chart(&mut state, &RenderExtras::default(), &mut recorder);
+
+    assert!(
+        !recorder.commands().is_empty(),
+        "ein Frame muss Befehle erzeugen"
+    );
+
+    let actual = recorder
+        .commands()
+        .iter()
+        .map(format_command)
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert_golden("full_frame_candlestick", actual);
+}
+
+#[test]
+fn a_frame_is_only_drawn_when_the_state_is_dirty() {
+    let mut generator = CandleGenerator::new(GeneratorConfig::crypto().with_seed(42));
+    let mut state = ChartState::new(800, 400, Timeframe::M5);
+    state.set_candles(generator.generate(50));
+    state.fit_to_data();
+
+    let mut first = BatchRenderer::new(800, 400);
+    render_chart(&mut state, &RenderExtras::default(), &mut first);
+    assert!(!first.commands().is_empty());
+
+    // Ohne Zustandsänderung darf kein zweiter Frame entstehen.
+    let mut second = BatchRenderer::new(800, 400);
+    render_chart(&mut state, &RenderExtras::default(), &mut second);
+    assert!(
+        second.commands().is_empty(),
+        "sauberer Zustand darf nicht neu zeichnen"
+    );
+
+    state.mark_dirty();
+    let mut third = BatchRenderer::new(800, 400);
+    render_chart(&mut state, &RenderExtras::default(), &mut third);
+    assert_eq!(
+        first.commands().len(),
+        third.commands().len(),
+        "nach mark_dirty muss derselbe Frame wieder entstehen"
+    );
+}
+
+#[test]
+fn the_viewport_height_survives_the_frame() {
+    let mut generator = CandleGenerator::new(GeneratorConfig::crypto().with_seed(42));
+    let mut state = ChartState::new(800, 400, Timeframe::M5);
+    state.set_candles(generator.generate(50));
+    state.fit_to_data();
+
+    let before = state.viewport.dimensions.height;
+    let mut recorder = BatchRenderer::new(800, 400);
+    render_chart(&mut state, &RenderExtras::default(), &mut recorder);
+
+    assert_eq!(
+        before, state.viewport.dimensions.height,
+        "der Loop verkleinert die Viewport-Höhe für Panes nur vorübergehend"
+    );
 }

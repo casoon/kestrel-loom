@@ -321,6 +321,79 @@ impl Canvas2DRenderer {
 }
 
 impl Renderer for Canvas2DRenderer {
+    fn draw_polyline(&mut self, points: &[(f64, f64)], color: Color, width: f64) {
+        Canvas2DRenderer::draw_polyline(self, points, color, width)
+    }
+
+    fn draw_area(
+        &mut self,
+        points: &[(f64, f64)],
+        baseline_y: f64,
+        fill: Color,
+        stroke: Color,
+        width: f64,
+    ) {
+        Canvas2DRenderer::draw_area(self, points, baseline_y, fill, stroke, width)
+    }
+
+    fn draw_horizontal_line(&mut self, y: f64, left: f64, right: f64, color: &Color, width: f64) {
+        Canvas2DRenderer::draw_horizontal_line(self, y, left, right, color, width)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn draw_ohlc(
+        &mut self,
+        x: f64,
+        open_y: f64,
+        high_y: f64,
+        low_y: f64,
+        close_y: f64,
+        width: f64,
+        bullish_color: Color,
+        bearish_color: Color,
+        unchanged_color: Color,
+    ) {
+        Canvas2DRenderer::draw_ohlc(
+            self,
+            x,
+            open_y,
+            high_y,
+            low_y,
+            close_y,
+            width,
+            bullish_color,
+            bearish_color,
+            unchanged_color,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn draw_hollow_candle(
+        &mut self,
+        x: f64,
+        open_y: f64,
+        high_y: f64,
+        low_y: f64,
+        close_y: f64,
+        width: f64,
+        bullish_color: Color,
+        bearish_color: Color,
+        unchanged_color: Color,
+    ) {
+        Canvas2DRenderer::draw_hollow_candle(
+            self,
+            x,
+            open_y,
+            high_y,
+            low_y,
+            close_y,
+            width,
+            bullish_color,
+            bearish_color,
+            unchanged_color,
+        )
+    }
+
     fn draw_vertical_line(&mut self, x: f64, top: f64, bottom: f64, color: &Color, width: f64) {
         Canvas2DRenderer::draw_vertical_line(self, x, top, bottom, color, width)
     }

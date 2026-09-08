@@ -6,6 +6,7 @@ mod buffer;
 mod candle_buffer;
 mod candle_lifecycle;
 mod chart;
+mod chart_renderer;
 
 mod chart_state;
 mod config;
@@ -28,6 +29,7 @@ pub use buffer::ChartBuffer;
 pub use candle_buffer::CandleBuffer;
 pub use candle_lifecycle::{CandleEvent, CandleStore};
 pub use chart::Chart;
+pub use chart_renderer::{render_chart, CompareSymbol, IndicatorPane, RenderExtras};
 pub use chart_state::{ChartOptions, ChartState, CrosshairState, InteractionState, MagnetMode};
 pub use config::ChartConfig;
 pub use events::{EventHandler, KeyboardEvent, MouseButton, MouseEvent, TouchEvent};
