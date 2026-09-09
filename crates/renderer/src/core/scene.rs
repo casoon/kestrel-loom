@@ -5,12 +5,14 @@
 //! der zweite Renderer dafür: dieselbe `Scene`, gezeichnet über
 //! [`crate::rendering::Renderer`].
 //!
-//! **Koordinatenannahme.** Chartkits `Axis` sagt nicht, worin `min`/`max` gemessen
-//! sind. Hier gilt: x ist ein Unix-Zeitstempel in Sekunden, y ein Preis — dieselbe
-//! Domäne wie `Candle.time` und `Candle.c`. Solange das nicht im Vertrag steht,
-//! ist es eine Annahme dieses Consumers; siehe `plan/02-chartkit-vertrag.md` §3.
+//! **Koordinaten.** Seit Chartkit 0.2.0 steht die Domäne am Typ: x ist ein
+//! Unix-Zeitstempel in Sekunden (UTC), y ein Wert — bei einem Preis-Pane der Preis.
+//! Dieselbe Domäne wie `Candle.time` und `Candle.c`.
+//!
+//! Die Achsen der Szene werden hier bewusst **nicht** ausgewertet: Der Renderer
+//! bildet über seinen eigenen Viewport ab, weil er den Bar-Satz kennt und Chartkit
+//! nicht. Genau das ist die Begründung, aus der die Domäne „Zeit" wurde.
 
-use kestrel_chartkit::artifact::Artifact;
 use kestrel_chartkit::viz::scene::{LineStyle as SceneLineStyle, Scene, SceneObjectKind};
 
 use crate::core::ChartState;
@@ -190,102 +192,17 @@ pub fn render_scene(scene: &Scene, state: &ChartState, renderer: &mut dyn Render
 
 /// Baut aus Chartkit-Artefakten eine Szene.
 ///
-/// Der Weg, den ein Consumer heute gehen muss: Chartkit liefert Artefakte über
-/// `IndicatorOutput::artifacts`, aber **niemand baut daraus eine `Scene`** — im
-/// ganzen Crate gibt es kein `Scene::new()` außerhalb der Tests.
-///
-/// `time_range` ist nötig, weil [`Artifact`]s keine Zeitgrenzen tragen: eine Zone
-/// kennt nur `price_top`/`price_bottom`. Sie wird deshalb über die gesamte sichtbare
-/// Breite gezeichnet.
-pub fn scene_from_artifacts(artifacts: &[Artifact], time_range: (i64, i64)) -> Scene {
-    use kestrel_chartkit::viz::scene::{Pane, SceneObject};
-
-    let (from, to) = (time_range.0 as f64, time_range.1 as f64);
-    let mut pane = Pane::new("artifacts", 1.0);
-
-    for (index, artifact) in artifacts.iter().enumerate() {
-        match artifact {
-            Artifact::Pivot(p) => {
-                pane.upsert_object(SceneObject::new(
-                    format!("pivot-{index}"),
-                    10,
-                    if p.confirmed { 1.0 } else { 0.5 },
-                    SceneObjectKind::Polyline {
-                        points: vec![
-                            (p.timestamp as f64, p.price),
-                            (p.timestamp as f64 + 1.0, p.price),
-                        ],
-                        color: if p.is_high { "#e5534b" } else { "#3fb950" }.to_string(),
-                        style: SceneLineStyle::Solid,
-                        width: 2.0,
-                    },
-                ));
-            }
-            Artifact::Zone(z) => {
-                pane.upsert_object(SceneObject::new(
-                    format!("zone-{index}"),
-                    1,
-                    (0.15 + z.strength.clamp(0.0, 1.0) * 0.35).min(0.5),
-                    SceneObjectKind::BoundedBox {
-                        x0: from,
-                        y0: z.price_top,
-                        x1: to,
-                        y1: z.price_bottom,
-                        fill_color: Some("#58a6ff".to_string()),
-                        border_color: None,
-                    },
-                ));
-            }
-            Artifact::Profile(p) => {
-                for (bin_index, bin) in p.bins.iter().enumerate() {
-                    // Ohne Zeitbezug am rechten Rand aufgehängt, Breite nach Wert.
-                    let span = to - from;
-                    let width = span * 0.12 * bin.value.clamp(0.0, 1.0);
-                    pane.upsert_object(SceneObject::new(
-                        format!("profile-{index}-{bin_index}"),
-                        0,
-                        0.35,
-                        SceneObjectKind::BoundedBox {
-                            x0: to - width,
-                            y0: bin.price_high,
-                            x1: to,
-                            y1: bin.price_low,
-                            fill_color: Some("#8b949e".to_string()),
-                            border_color: None,
-                        },
-                    ));
-                }
-            }
-            Artifact::Scenario(s) => {
-                pane.upsert_object(SceneObject::new(
-                    format!("scenario-{index}"),
-                    20,
-                    1.0,
-                    SceneObjectKind::Table {
-                        x: from,
-                        y: 0.0,
-                        rows: vec![vec![
-                            s.name.clone(),
-                            s.stage.clone(),
-                            format!("{:.0}%", s.progress * 100.0),
-                        ]],
-                    },
-                ));
-            }
-        }
-    }
-
-    let mut scene = Scene::new();
-    scene.upsert_pane(pane);
-    scene
-}
+/// Seit Chartkit 0.2.0 liegt diese Abbildung dort — hier steht nur noch die
+/// Weiterleitung, damit Aufrufer nicht zwei Wege kennen müssen. Der frühere Nachbau
+/// in diesem Modul ist entfallen; er hätte sonst auseinanderlaufen können.
+pub use kestrel_chartkit::viz::scene_from_artifacts;
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::core::{CandleGenerator, GeneratorConfig, Timeframe};
     use crate::rendering::{BatchRenderer, RenderCommand};
-    use kestrel_chartkit::artifact::{PivotArtifact, ZoneArtifact};
+    use kestrel_chartkit::artifact::{Artifact, PivotArtifact, ZoneArtifact};
     use kestrel_chartkit::viz::scene::{Pane, SceneObject};
 
     fn state_with_candles() -> ChartState {
@@ -382,16 +299,10 @@ mod tests {
                 is_high: true,
                 confirmed: true,
             }),
-            Artifact::Zone(ZoneArtifact {
-                kind: "supply".to_string(),
-                price_top: 102.0,
-                price_bottom: 101.0,
-                strength: 0.8,
-                touches: 3,
-            }),
+            Artifact::Zone(ZoneArtifact::new("supply", 102.0, 101.0).spanning(range.0, range.1)),
         ];
 
-        let scene = scene_from_artifacts(&artifacts, range);
+        let scene = scene_from_artifacts(&artifacts, Some(range));
         let mut recorder = BatchRenderer::new(800, 400);
         render_scene(&scene, &state, &mut recorder);
 
