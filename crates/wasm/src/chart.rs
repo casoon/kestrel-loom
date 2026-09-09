@@ -29,6 +29,8 @@ pub struct WasmChart {
     footprint_enabled: bool,
     drawing_drag_anchor: Option<(i64, f64)>,
     indicator_panes: Vec<IndicatorPane>,
+    draw_indicator_artifacts: bool,
+    scene: Option<kestrel_loom::core::Scene>,
 }
 
 #[wasm_bindgen]
@@ -54,6 +56,8 @@ impl WasmChart {
             footprint_enabled: false,
             drawing_drag_anchor: None,
             indicator_panes: Vec::new(),
+            draw_indicator_artifacts: false,
+            scene: None,
         })
     }
 
@@ -610,9 +614,8 @@ impl WasmChart {
             indicator_panes: &self.indicator_panes,
             compare_symbols: &self.compare_symbols,
             footprint_candles: &self.footprint_candles,
-            // Szenen kommen noch nicht über die JS-Grenze — der Renderer kann sie
-            // bereits zeichnen (M4-Spike, siehe plan/02-chartkit-vertrag.md).
-            scene: None,
+            scene: self.scene.as_ref(),
+            draw_indicator_artifacts: self.draw_indicator_artifacts,
         };
 
         render_chart(&mut self.state, &extras, renderer);
@@ -1033,6 +1036,34 @@ impl WasmChart {
         self.normalize_indicator_panes();
         self.state.mark_dirty();
         Ok(pane_id)
+    }
+
+    /// Zeichnet die Artefakte der aktiven Indikatoren mit — Zonen, Pivots, Profile.
+    ///
+    /// Sie fallen bei der Berechnung ohnehin an; ohne dieses Flag werden sie verworfen.
+    #[wasm_bindgen(js_name = setIndicatorArtifactsEnabled)]
+    pub fn set_indicator_artifacts_enabled(&mut self, enabled: bool) {
+        self.draw_indicator_artifacts = enabled;
+        self.state.mark_dirty();
+    }
+
+    /// Legt eine von außen gebaute Chartkit-Szene über den Chart.
+    ///
+    /// Erwartet das JSON einer `kestrel_chartkit::viz::scene::Scene`. Ein leerer
+    /// String entfernt sie wieder.
+    #[wasm_bindgen(js_name = setScene)]
+    pub fn set_scene(&mut self, scene_json: &str) -> Result<(), JsValue> {
+        let trimmed = scene_json.trim();
+        self.scene = if trimmed.is_empty() {
+            None
+        } else {
+            Some(
+                serde_json::from_str(trimmed)
+                    .map_err(|e| JsValue::from_str(&format!("Ungültige Szene: {e}")))?,
+            )
+        };
+        self.state.mark_dirty();
+        Ok(())
     }
 
     /// Namen aller Indikatoren, die `kestrel-chartkit` kennt, als JSON-Array.

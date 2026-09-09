@@ -70,9 +70,34 @@ pub struct RenderExtras<'a> {
     pub indicator_panes: &'a [IndicatorPane],
     pub compare_symbols: &'a [CompareSymbol],
     pub footprint_candles: &'a [FootprintCandle],
-    /// Eine Chartkit-Szene, die über den Preischart gelegt wird (Zonen, Pivots,
-    /// Profile). Siehe [`crate::core::scene`].
+    /// Eine von außen gereichte Chartkit-Szene, die über den Preischart gelegt wird.
+    /// Siehe [`crate::core::scene`].
     pub scene: Option<&'a kestrel_chartkit::viz::scene::Scene>,
+    /// Wenn gesetzt, werden zusätzlich die Artefakte der Indikatoren gezeichnet —
+    /// Zonen, Pivots und Profile, die die Indikatoren ohnehin melden.
+    pub draw_indicator_artifacts: bool,
+}
+
+/// Sammelt die Artefakte aller Panes zu einer Szene.
+///
+/// Die Abbildung Artefakt → Szenenobjekt liegt in `kestrel-chartkit`; hier wird nur
+/// eingesammelt. `fallback_span` fängt Artefakte auf, die keine eigene Zeitspanne
+/// tragen — seit Chartkit 0.2.0 die Ausnahme.
+pub fn scene_from_indicator_panes(
+    panes: &[IndicatorPane],
+    fallback_span: Option<(i64, i64)>,
+) -> Option<kestrel_chartkit::viz::scene::Scene> {
+    let artifacts: Vec<_> = panes
+        .iter()
+        .flat_map(|pane| pane.series.artifacts().iter().cloned())
+        .collect();
+    if artifacts.is_empty() {
+        return None;
+    }
+    Some(kestrel_chartkit::viz::scene_from_artifacts(
+        &artifacts,
+        fallback_span,
+    ))
 }
 
 /// Zeichnet einen vollständigen Frame.
@@ -85,6 +110,7 @@ pub fn render_chart(state: &mut ChartState, extras: &RenderExtras, renderer: &mu
         compare_symbols,
         footprint_candles,
         scene,
+        draw_indicator_artifacts,
     } = *extras;
 
     if !state.is_dirty() {
@@ -369,6 +395,16 @@ pub fn render_chart(state: &mut ChartState, extras: &RenderExtras, renderer: &mu
         main_height,
     );
     render_overlay_indicators(indicator_panes, state, renderer);
+
+    if draw_indicator_artifacts {
+        let fallback = match (state.candles.first(), state.candles.last()) {
+            (Some(first), Some(last)) => Some((first.time, last.time)),
+            _ => None,
+        };
+        if let Some(artifact_scene) = scene_from_indicator_panes(indicator_panes, fallback) {
+            crate::core::scene::render_scene(&artifact_scene, state, renderer);
+        }
+    }
 
     if let Some(scene) = scene {
         crate::core::scene::render_scene(scene, state, renderer);

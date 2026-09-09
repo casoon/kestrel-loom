@@ -33,7 +33,8 @@ pub use candle_buffer::CandleBuffer;
 pub use candle_lifecycle::{CandleEvent, CandleStore};
 pub use chart::Chart;
 pub use chart_renderer::{
-    render_chart, update_indicator_panes, CompareSymbol, IndicatorPane, RenderExtras,
+    render_chart, scene_from_indicator_panes, update_indicator_panes, CompareSymbol, IndicatorPane,
+    RenderExtras,
 };
 pub use chart_state::{ChartOptions, ChartState, CrosshairState, InteractionState, MagnetMode};
 pub use config::ChartConfig;
@@ -46,6 +47,7 @@ pub use indicators::{placement_for, IndicatorLine, IndicatorPlacement, Indicator
 pub use invalidation::{
     InvalidationLevel, InvalidationLevels, InvalidationMask, LayeredInvalidation, RenderLayer,
 };
+pub use kestrel_chartkit::viz::scene::Scene;
 pub use overlay::{ChartOverlay, OverlayRegistry};
 pub use pane::{Pane, PaneLayout};
 pub use scale::{PriceScale, ScaleMode};

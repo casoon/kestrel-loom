@@ -14,8 +14,9 @@
 use std::collections::HashMap;
 
 use kestrel_loom::core::{
-    render_chart, update_indicator_panes, CandleGenerator, ChartState, GeneratorConfig,
-    IndicatorPane, IndicatorPlacement, PriceRange, RenderExtras, TimeRange, Timeframe, Viewport,
+    render_chart, scene_from_indicator_panes, update_indicator_panes, CandleGenerator, ChartState,
+    GeneratorConfig, IndicatorPane, IndicatorPlacement, PriceRange, RenderExtras, TimeRange,
+    Timeframe, Viewport,
 };
 use kestrel_loom::rendering::{cull_candles, DrawStyle};
 use kestrel_loom::tools::{ChartTool, HorizontalLine, ToolManager, ToolNode, TrendLine};
@@ -495,4 +496,73 @@ fn parse_style(name: &str) -> kestrel_loom::primitives::CandleStyle {
         "footprint" => CandleStyle::Footprint,
         other => panic!("unbekannte Darstellung {other}"),
     }
+}
+
+/// Artefakte eines Indikators werden als Szene gezeichnet — Zonen und Profile, die
+/// bisher berechnet und dann verworfen wurden.
+#[test]
+fn indicator_artifacts_are_drawn_when_asked_for() {
+    let mut generator = CandleGenerator::new(
+        GeneratorConfig::crypto()
+            .with_seed(42)
+            .with_timeframe(Timeframe::M5),
+    );
+
+    let mut state = ChartState::new(800, 400, Timeframe::M5);
+    state.set_candles(generator.generate(300));
+    state.fit_to_data();
+
+    let mut panes =
+        vec![
+            IndicatorPane::new("pane-vp", "extended_volume_profile", HashMap::new(), 0.28).unwrap(),
+        ];
+    update_indicator_panes(&mut panes, &state.candles);
+
+    assert!(
+        !panes[0].series.artifacts().is_empty(),
+        "das Volumenprofil meldet Artefakte"
+    );
+
+    let span = (
+        state.candles[0].time,
+        state.candles[state.candles.len() - 1].time,
+    );
+    let scene =
+        scene_from_indicator_panes(&panes, Some(span)).expect("Artefakte ergeben eine Szene");
+    let objects: usize = scene.panes().iter().map(|p| p.objects().len()).sum();
+    assert!(objects > 0, "die Szene enthält Objekte");
+
+    // Ohne Flag: keine Artefaktobjekte im Strom.
+    let without = {
+        let mut r = BatchRenderer::new(800, 400);
+        render_chart(
+            &mut state,
+            &RenderExtras {
+                indicator_panes: &panes,
+                ..Default::default()
+            },
+            &mut r,
+        );
+        r.commands().len()
+    };
+
+    state.mark_dirty();
+    let with = {
+        let mut r = BatchRenderer::new(800, 400);
+        render_chart(
+            &mut state,
+            &RenderExtras {
+                indicator_panes: &panes,
+                draw_indicator_artifacts: true,
+                ..Default::default()
+            },
+            &mut r,
+        );
+        r.commands().len()
+    };
+
+    assert!(
+        with > without,
+        "mit Artefakten müssen mehr Befehle entstehen ({with} statt {without})"
+    );
 }

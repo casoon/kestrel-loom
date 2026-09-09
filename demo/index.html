@@ -41,6 +41,7 @@
         <option value="renko:0.5">Renko</option>
       </select>
       <select id="indicator"><option value="">— Indikator —</option></select>
+      <label><input type="checkbox" id="artifacts" /> Artefakte</label>
       <button id="fit">Fit</button>
       <button id="theme">Theme</button>
       <div class="spacer"></div>
@@ -122,6 +123,13 @@
           } catch (err) {
             status.textContent = `style.set("${e.target.value}") abgelehnt: ${err}`;
           }
+        });
+
+        document.getElementById('artifacts').addEventListener('change', (e) => {
+          chart.indicators.artifacts(e.target.checked);
+          status.textContent = e.target.checked
+            ? 'Artefakte an — sichtbar bei Indikatoren, die welche melden (z. B. extended_volume_profile)'
+            : 'Artefakte aus';
         });
 
         document.getElementById('fit').addEventListener('click', () => chart.view.fit());

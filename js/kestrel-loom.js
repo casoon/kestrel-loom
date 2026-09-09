@@ -184,6 +184,19 @@ export async function createChart(canvas, options = {}) {
       remove: (paneId) => chart.removePane(paneId),
       height: (paneId, fraction) => chart.setPaneHeightFraction(paneId, fraction),
       layout: () => parse(chart.getPaneLayout(), []),
+      /**
+       * Zeichnet die Artefakte der aktiven Indikatoren mit — Zonen, Pivots,
+       * Volumenprofile. Sie fallen bei der Berechnung ohnehin an.
+       */
+      artifacts: (on) => chart.setIndicatorArtifactsEnabled(on !== false),
+    },
+
+    scene: {
+      /** Legt eine Chartkit-Szene über den Chart (Objekt oder JSON-String). */
+      set: (scene) =>
+        chart.setScene(typeof scene === 'string' ? scene : JSON.stringify(scene)),
+      /** Entfernt sie wieder. */
+      clear: () => chart.setScene(''),
     },
 
     tools: {

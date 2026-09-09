@@ -9,6 +9,7 @@
 
 use std::collections::HashMap;
 
+use kestrel_chartkit::artifact::Artifact;
 use kestrel_chartkit::indicator::registry::{build_checked, catalog};
 use kestrel_chartkit::{Bar, Indicator};
 
@@ -118,6 +119,13 @@ pub struct IndicatorSeries {
     /// zeichnen ist der Unterschied zwischen einem MACD und einer einzelnen Linie,
     /// die so tut, als wäre sie einer.
     lines: Vec<IndicatorLine>,
+    /// Artefakte der zuletzt meldenden Bar — Zonen, Pivots, Profile.
+    ///
+    /// Bewusst nur die letzte Meldung, nicht gesammelt: Seit Chartkit 0.2.0 tragen
+    /// Artefakte ihre eigene Zeitspanne (`from_ts`/`to_ts`), die jüngste Meldung
+    /// beschreibt den Sachverhalt also bereits vollständig. Anzusammeln hieße, jede
+    /// Bar dieselbe Zone erneut zu speichern.
+    artifacts: Vec<Artifact>,
     /// Wie viele Kerzen bereits eingespeist wurden.
     fed: usize,
     /// Zeitstempel der zuletzt eingespeisten Kerze — erkennt Serienwechsel.
@@ -142,6 +150,7 @@ impl IndicatorSeries {
                     points: Vec::new(),
                 })
                 .collect(),
+            artifacts: Vec::new(),
             fed: 0,
             last_time: None,
         })
@@ -175,12 +184,18 @@ impl IndicatorSeries {
         placement_for(&self.name)
     }
 
+    /// Artefakte der zuletzt meldenden Bar.
+    pub fn artifacts(&self) -> &[Artifact] {
+        &self.artifacts
+    }
+
     /// Verwirft den Zustand und beginnt von vorn.
     pub fn reset(&mut self) {
         self.inner.reset();
         for line in &mut self.lines {
             line.points.clear();
         }
+        self.artifacts.clear();
         self.fed = 0;
         self.last_time = None;
     }
@@ -223,6 +238,10 @@ impl IndicatorSeries {
                             line.points.push((candle.time, v));
                         }
                     }
+                }
+
+                if !out.artifacts.is_empty() {
+                    self.artifacts.clone_from(&out.artifacts);
                 }
             }
             self.last_time = Some(candle.time);
@@ -320,6 +339,31 @@ mod tests {
                 "{name} steht in der Overlay-Liste, aber nicht in Chartkits Katalog"
             );
         }
+    }
+
+    #[test]
+    fn artifacts_arrive_with_their_own_time_span() {
+        let mut series = IndicatorSeries::new("extended_volume_profile", HashMap::new()).unwrap();
+        series.feed(&candles(300));
+
+        assert!(
+            !series.artifacts().is_empty(),
+            "das Volumenprofil meldet Zonen und Profile"
+        );
+
+        let spans: Vec<Option<(i64, i64)>> = series
+            .artifacts()
+            .iter()
+            .map(|a| match a {
+                Artifact::Zone(z) => z.span(),
+                Artifact::Profile(p) => p.span(),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            spans.iter().all(|s| s.is_some()),
+            "seit Chartkit 0.2.0 tragen sie ihre Zeitgrenzen selbst: {spans:?}"
+        );
     }
 
     #[test]
