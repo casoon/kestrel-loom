@@ -271,24 +271,15 @@ impl WasmChart {
     /// Resize the chart
     #[wasm_bindgen(js_name = resize)]
     pub fn resize(&mut self, width: u32, height: u32) -> Result<(), JsValue> {
-        if let Some(renderer) = &mut self.renderer {
-            renderer.resize(width, height)?;
-
-            // Get pixel ratio from renderer and update viewport
-            let pixel_ratio = renderer.pixel_ratio();
-            self.state
-                .viewport
-                .set_dimensions(width, height, pixel_ratio);
-            // Ohne dieses mark_dirty bleibt der Chart nach einer Größenänderung
-            // leer: der Browser löscht den Canvas beim Setzen von width/height,
-            // und der nächste render()-Aufruf kehrt sofort zurück, weil der
-            // Zustand als sauber gilt. `ChartState::resize` (der Zweig ohne
-            // Renderer) tat das schon, der angehängte Fall nicht.
-            self.state.mark_dirty();
-        } else {
-            // No renderer, just update state dimensions
-            self.state.resize(width, height);
-        }
+        let pixel_ratio = match &mut self.renderer {
+            Some(renderer) => {
+                renderer.resize(width, height)?;
+                renderer.pixel_ratio()
+            }
+            None => self.state.viewport.dimensions.pixel_ratio,
+        };
+        // Beide Zweige über denselben Weg — er markiert den Zustand als verändert.
+        self.state.apply_dimensions(width, height, pixel_ratio);
 
         Ok(())
     }

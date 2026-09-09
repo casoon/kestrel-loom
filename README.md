@@ -90,16 +90,20 @@ it draws what it is given.
 
 ## Status
 
-Working: core, WASM façade, JS wrapper, demo, 204 tests, CI gate (fmt, clippy
-`-D warnings`, tests, wasm32 build, `wasm-pack` smoke build, strict rustdoc).
+Working: core, WASM façade, JS wrapper, demo, scenes and indicator artifacts. 208 core
+tests plus 11 façade tests (`wasm-pack test --node`), all in the CI gate — fmt, clippy
+`-D warnings`, tests, wasm32 build, `wasm-pack` smoke build, strict rustdoc, and a check
+that the core never grows a browser dependency.
+
+In use by [Kestrel](https://github.com/casoon/kestrel-chartkit)'s desktop app since
+2026-09-09, which took it unchanged.
 
 Missing:
 
-- Scenes cannot yet be handed across the JS boundary — the renderer draws them, the
-  façade always passes `None`.
-- Indicator artifacts (order blocks, fair value gaps, volume profiles) are computed but
-  not yet collected into a scene.
-- The WASM façade has no tests of its own.
+- Rendering inside a Tauri webview has been reasoned about, not measured — the engine is
+  the same, but that is a conclusion, not a test.
+- Trading pauses are drawn as gaps: the renderer maps time linearly, so an instrument
+  with market hours shows empty weekends. A bar-index mapping is the natural next step.
 
 ## Provenance
 

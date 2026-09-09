@@ -191,8 +191,20 @@ impl ChartState {
 
     /// Resize the chart
     pub fn resize(&mut self, width: u32, height: u32) {
-        self.viewport.dimensions.width = width;
-        self.viewport.dimensions.height = height;
+        let pixel_ratio = self.viewport.dimensions.pixel_ratio;
+        self.apply_dimensions(width, height, pixel_ratio);
+    }
+
+    /// Setzt Maße samt Pixelverhältnis — und markiert den Zustand als verändert.
+    ///
+    /// Der einzige Weg, die Maße zu ändern. Vorher setzte die WASM-Fassade sie im
+    /// Zweig mit angehängtem Renderer direkt am Viewport und vergaß dabei
+    /// `mark_dirty()`; da der Browser den Canvas beim Setzen von `width`/`height`
+    /// löscht und der nächste `render()` bei sauberem Zustand sofort zurückkehrt,
+    /// blieb der Chart nach jeder Größenänderung leer. Über diesen Weg ist der
+    /// Fehler nicht mehr formulierbar.
+    pub fn apply_dimensions(&mut self, width: u32, height: u32, pixel_ratio: f64) {
+        self.viewport.set_dimensions(width, height, pixel_ratio);
         self.mark_dirty();
     }
 
@@ -377,5 +389,42 @@ mod tests {
 
         state.end_interaction();
         assert_eq!(state.interaction, InteractionState::Idle);
+    }
+}
+
+#[cfg(test)]
+mod dimension_tests {
+    use super::*;
+
+    fn state() -> ChartState {
+        let mut state = ChartState::new(800, 400, Timeframe::M5);
+        state.clear_dirty();
+        state
+    }
+
+    #[test]
+    fn applying_dimensions_marks_the_state_dirty() {
+        let mut s = state();
+        s.apply_dimensions(1000, 500, 2.0);
+
+        assert_eq!(s.viewport.dimensions.width, 1000);
+        assert_eq!(s.viewport.dimensions.height, 500);
+        assert_eq!(s.viewport.dimensions.pixel_ratio, 2.0);
+        assert!(
+            s.is_dirty(),
+            "sonst bleibt der Canvas nach dem Umschalten leer — siehe plan/04-befunde.md B4"
+        );
+    }
+
+    #[test]
+    fn resize_keeps_the_pixel_ratio() {
+        let mut s = state();
+        s.apply_dimensions(800, 400, 3.0);
+        s.clear_dirty();
+
+        s.resize(640, 320);
+
+        assert_eq!(s.viewport.dimensions.pixel_ratio, 3.0);
+        assert!(s.is_dirty());
     }
 }

@@ -50,6 +50,11 @@ jobs:
       - name: WASM Package Smoke Build
         run: ./build-wasm.sh
 
+      # Die Fassade laesst sich ohne Browser pruefen, solange kein Canvas noetig ist —
+      # Zustand, Validierung, Katalog, Export/Import.
+      - name: WASM Facade Tests
+        run: wasm-pack test --node crates/wasm
+
       - name: Benchmarks Compile And Run Once
         run: cargo bench --workspace -- --test
 
