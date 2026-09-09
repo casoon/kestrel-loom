@@ -1,101 +1,118 @@
 # kestrel-loom
 
-Interaktiver Chart-Renderer der `kestrel`-Familie: Rust → WebAssembly → Canvas 2D.
+Interactive trading-chart renderer: Rust → WebAssembly → Canvas 2D.
 
-`kestrel-chartkit` beschreibt in `viz::scene` ein bewusst renderer-neutrales Szenenmodell
-(Panes, Achsen, z-geordnete Objekte, identity-keyed Updates) und rendert daraus heute nur
-statisches SVG. Dieses Repo ist der fehlende Renderer: es nimmt Chartkit-Szenen plus eine
-OHLC-Serie entgegen und zeichnet sie interaktiv — Zoom, Pan, Crosshair, Multi-Pane,
-Zeichenwerkzeuge.
+`kestrel-loom` draws candlestick charts, indicator panes and drawing tools in the
+browser. The chart state, the viewport math and the whole render loop live in plain
+Rust and produce a stream of drawing commands; only a thin façade knows what a canvas
+is. Indicator math is not in this repository — it comes from
+[`kestrel-chartkit`](https://github.com/casoon/kestrel-chartkit), which contributes 91
+streaming indicators.
 
-Der Code stammt aus dem Rendering-Kern von
-[`loomchart`](https://github.com/casoon/loomchart); die dortige eigene Indikator-Schicht
-wird bei der Übernahme **nicht** mitgenommen, sondern durch `kestrel-chartkit` ersetzt.
+> **Alpha.** The chart runs and is exercised in a browser, but the API is not stable
+> and pieces are missing — see [Status](#status).
 
-## Rolle in der Familie
+## Why the split
 
-| Repo | Rolle |
+A renderer that owns its own indicator library ends up maintaining two of everything.
+Here the boundary is deliberate:
+
+| | |
 |---|---|
-| `kestrel-chartkit` | Rechenschicht (Indikatoren, Scoring, Szenenmodell) |
-| `kestrel-connector` | Anbieter-Clients |
-| `kestrel-marketdata` | Instrument-Registry, Archiv, Store |
-| `kestrel` | Dashboard (Tauri) |
-| `kestrel-report` | Batch-Berichte |
-| **`kestrel-loom`** | **interaktiver Renderer für Chartkit-Szenen** |
+| `kestrel-chartkit` | indicator math, scoring, artifacts, the renderer-neutral scene model |
+| **`kestrel-loom`** | **viewport, scales, panes, tools, the render loop, canvas output** |
 
-## Aufbau
+Chartkit knows nothing about browsers; this crate knows nothing about how an RSI is
+computed. Neither is a plugin of the other — they meet at a data contract.
+
+## Layout
 
 ```
-crates/renderer/   kestrel-loom        Kern: Zustand, Viewport, Skalen, Panes, Werkzeuge,
-                                       RenderCommand-Modell — ohne Browser-API
-crates/wasm/       kestrel-loom-wasm   wasm-bindgen-Fassade + Canvas-2D-Ausführung
+crates/renderer/   kestrel-loom        core: state, viewport, scales, panes, tools,
+                                       render loop, RenderCommand model — no browser API
+crates/wasm/       kestrel-loom-wasm   wasm-bindgen façade + Canvas 2D execution
+js/                kestrel-loom.js     grouped JavaScript wrapper — what you embed
+demo/                                  a small page to look at and copy from
 ```
 
-Dass der Kern browserfrei ist, ist erzwungen und nicht bloß Absicht:
-`cargo tree -p kestrel-loom` enthält weder `web-sys` noch `js-sys` oder `wasm-bindgen`.
+**The core stays browser-free, and that is enforced rather than intended:** CI fails if
+`cargo tree -p kestrel-loom` ever grows a `web-sys`, `js-sys` or `wasm-bindgen`
+dependency. That is what makes a full frame testable without a browser — a render pass
+writes `RenderCommand`s into a recorder, and golden fixtures compare the resulting
+stream.
 
-## Bauen und prüfen
+## Quick start
 
 ```sh
-cargo test -p kestrel-loom          # Kern, ohne Browser
-./build-wasm.sh                     # WASM-Paket nach ./pkg
+./build-wasm.sh                 # wasm-pack build into ./pkg
+python3 -m http.server 8777     # then open http://localhost:8777/demo/
 ```
-
-## Demo
-
-```sh
-./build-wasm.sh
-python3 -m http.server 8777      # dann http://localhost:8777/demo/
-```
-
-Eine kleine Seite mit deterministischen Kerzen: Darstellungswechsel
-(Candlestick, OHLC, Hollow, Line, Area, Renko), Zoom per Mausrad, Pan, Crosshair,
-Theme-Umschaltung. Sie ist bewusst klein gehalten — sie soll zeigen, dass die
-Kette Kern → WASM → Canvas trägt, und als Vorlage für die Einbindung dienen.
-
-## Einbinden
 
 ```js
-import { createChart } from 'kestrel-loom/js/kestrel-loom.js';
+import { createChart } from './js/kestrel-loom.js';
 
 const chart = await createChart(canvas, { timeframe: '5m', dark: true });
-chart.data.set(candles);                 // [{ time, o, h, l, c, v }] in Unix-Sekunden
+
+chart.data.set(candles);          // [{ time, o, h, l, c, v }], time in Unix seconds
 chart.view.fit();
-chart.indicators.add('rsi');             // 91 Indikatoren aus kestrel-chartkit
-chart.tools.trendLine('t1', { time: 1600010000, price: 99 }, { time: 1600060000, price: 103 });
+chart.indicators.add('rsi');      // any name from chart.indicators.available()
+chart.tools.trendLine('t1', { time: 1600010000, price: 99 },
+                            { time: 1600060000, price: 103 });
 ```
 
-`js/kestrel-loom.js` gruppiert die 86 flachen Methoden der WASM-Fassade nach
-`data`, `view`, `style`, `indicators`, `tools`, `compare` und `state` und nimmt
-gleich das ab, was sonst jeder Aufrufer selbst schreibt: Canvas-Größe samt
-`devicePixelRatio`, `ResizeObserver`, Maus-/Touch-/Tastatureingaben, eine
-Zeichenschleife, die nur bei Änderungen rendert, JSON hin und zurück sowie die
-`BigInt`-Zeitstempel an der WASM-Grenze. Die flache API bleibt über `chart.raw`
-erreichbar.
+The wrapper groups the façade's 86 flat methods into `data`, `view`, `style`,
+`indicators`, `tools`, `compare` and `state`, and takes care of the parts every caller
+would otherwise write again: canvas sizing with `devicePixelRatio`, a `ResizeObserver`,
+mouse/touch/keyboard wiring, a render loop that only draws when something changed, JSON
+marshalling, and the `BigInt` timestamps at the WASM boundary. The flat API stays
+reachable as `chart.raw`.
 
-## Examples
+## What it does
 
-Laufen alle ohne Browser:
+- **Chart types** — candlestick, OHLC, hollow, line, area, Heikin Ashi, Renko, footprint
+- **Indicators** — all 91 from `kestrel-chartkit`, fed incrementally (`on_bar` per new
+  bar, no window recomputation). Price-unit indicators such as Bollinger, Keltner or
+  Supertrend draw as overlays on the price chart; oscillators get their own pane. Multi-
+  line outputs (MACD signal and histogram, band upper/lower) are drawn, not dropped.
+- **Tools** — trend lines, horizontal and vertical lines, rectangles, ellipses,
+  Fibonacci retracements, text labels; hit testing, selection, snapping, undo/redo
+- **Interaction** — zoom, pan, crosshair, log/linear price scale, themes
+- **Scenes** — `kestrel-chartkit`'s `viz::scene` model rendered onto canvas: zones,
+  pivots, profiles, with z-order and opacity
 
-```sh
-cargo run -p kestrel-loom --example candles_and_viewport   # Kerzen, Viewport, Pixelabbildung
-cargo run -p kestrel-loom --example tools_to_commands      # Werkzeuge -> RenderCommand-Strom
-cargo run -p kestrel-loom --example state_roundtrip        # Zustand sichern und laden
-```
+Time is Unix **seconds**, UTC, everywhere — the same domain the scene model declares.
 
-`tools_to_commands` zeigt den Kern der Architektur: Werkzeuge schreiben in einen
-`&mut dyn Renderer`, der `BatchRenderer` sammelt daraus einen prüfbaren
-`RenderCommand`-Strom — ohne Canvas, ohne `web-sys`.
+## What it does not do
 
-## Stand
+No indicator math, no strategies, no backtesting, no persistence, no data feed, no
+backend. Those belong to other crates. It also does not decide what your chart means:
+it draws what it is given.
 
-Kern und WASM-Fassade sind übernommen, der Renderloop liegt im Kern und ein
-vollständiger Frame ist als Golden-Fixture ohne Browser prüfbar. Die Demo läuft.
-Offen ist die Indikator-Anbindung an `kestrel-chartkit`. Konzept, Übernahme-Inventar und
-Meilensteine liegen im (gitignorierten) `plan/`-Verzeichnis.
+## Status
 
-## Lizenz
+Working: core, WASM façade, JS wrapper, demo, 204 tests, CI gate (fmt, clippy
+`-D warnings`, tests, wasm32 build, `wasm-pack` smoke build, strict rustdoc).
 
-[BUSL-1.1](./LICENSE) — dieselben Parameter wie `kestrel-chartkit`: nicht-kommerzielle
-Nutzung frei, kommerzielle Nutzung erfordert eine Lizenz vom Licensor, Umstellung auf
-Apache-2.0 vier Jahre nach Veröffentlichung.
+Missing:
+
+- Scenes cannot yet be handed across the JS boundary — the renderer draws them, the
+  façade always passes `None`.
+- Indicator artifacts (order blocks, fair value gaps, volume profiles) are computed but
+  not yet collected into a scene.
+- The WASM façade has no tests of its own.
+
+## Provenance
+
+The rendering core comes from [`loomchart`](https://github.com/casoon/loomchart) (now
+archived), stripped of its own indicator layer and of a dead second drawing system. The
+move surfaced a few things that had never shown up there: the documented "main render
+loop" was unreachable code, indicators recomputed whole windows despite documentation
+claiming otherwise, an advertised chart type did not exist, and the candle generator
+emitted milliseconds where everything else expected seconds — which silently disabled
+zooming in every test and example path. All fixed here.
+
+## License
+
+[BUSL-1.1](./LICENSE), the same terms as `kestrel-chartkit`: free for non-commercial
+use including production, commercial use requires a license from the licensor, and the
+work converts to Apache-2.0 four years after publication.
