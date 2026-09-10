@@ -16,4 +16,4 @@ chrono = "0.4"
 uuid = { version = "1.11", features = ["v4", "serde", "js"] }
 # Rechenschicht der Familie. Auf einen Tag gepinnt, nicht als Path-Dependency —
 # siehe plan/06-anforderungen.md F1.
-kestrel-chartkit = { git = "https://github.com/casoon/kestrel-chartkit.git", tag = "v0.2.0" }
+kestrel-chartkit = { git = "https://github.com/casoon/kestrel-chartkit.git", tag = "v0.11.1" }
