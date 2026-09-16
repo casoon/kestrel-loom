@@ -38,16 +38,26 @@ pub enum IndicatorPlacement {
 ///
 /// Unbekannte Namen gelten als [`IndicatorPlacement::Pane`]: ein falsch platziertes
 /// Overlay verzerrt die Preisskala des Hauptcharts, ein überflüssiges Pane nicht.
+///
+/// Die Liste wird nicht von Hand gepflegt und dann gehofft: der Test
+/// `the_overlay_list_matches_what_the_indicators_actually_compute` speist jeden
+/// Katalog-Indikator mit Kerzen um einen unverwechselbaren Kurs und vergleicht
+/// die gezeichneten Linien mit der Liste. Nötig wurde er, weil Chartkit zwischen
+/// 0.2.0 und 0.12.0 von 91 auf 105 Indikatoren wuchs und neun davon — `t3`,
+/// `twap`, `vidya` und Geschwister — still als Pane landeten, obwohl sie Preise
+/// rechnen.
 const PRICE_UNIT_INDICATORS: &[&str] = &[
     "alligator",
     "anchored_vwap",
     "bollinger",
+    "chande_kroll",
     "chandelier_exit",
     "chandelier_flip_radar",
     "dema",
     "donchian",
     "ema",
     "envelope",
+    "extended_volume_profile",
     "hma",
     "ichimoku",
     "kama",
@@ -55,10 +65,17 @@ const PRICE_UNIT_INDICATORS: &[&str] = &[
     "lsma",
     "mcginley",
     "midas",
+    "money_flow_profile",
     "parabolic_sar",
+    "persistent_volume_profile",
+    "pivot_sets",
     "sma",
     "supertrend",
+    "t3",
     "tema",
+    "twap",
+    "vidya",
+    "volume_profile",
     "vwap",
     "vwma",
     "wma",
@@ -277,7 +294,11 @@ mod tests {
     #[test]
     fn catalog_is_not_empty() {
         let names = IndicatorSeries::available();
-        assert!(names.len() > 50, "erwartet 90+, gefunden {}", names.len());
+        assert!(
+            names.len() > 50,
+            "Chartkit 0.12.0 liefert 105, gefunden {}",
+            names.len()
+        );
         assert!(names.iter().any(|n| n == "rsi"));
     }
 
@@ -327,6 +348,93 @@ mod tests {
             placement_for("gibtsnicht"),
             IndicatorPlacement::Pane,
             "unbekannt gilt als Pane — ein falsches Overlay verzerrt die Preisskala"
+        );
+    }
+
+    /// Kerzen um einen Kurs, den kein Oszillator zufällig trifft.
+    ///
+    /// 4321 statt 100: ein RSI läuft zwischen 0 und 100 und wäre bei einem
+    /// Instrument, das um 50 notiert, nicht von einem Preis zu unterscheiden.
+    fn probe_candles(n: usize, base: f64) -> Vec<Candle> {
+        (0..n)
+            .map(|i| {
+                let time = 1_600_000_000 + i as i64 * 3600;
+                let o = base + (i as f64 * 0.11).sin() * base * 0.03;
+                let c = o + (i as f64 * 0.37).cos() * base * 0.004;
+                Candle::new(
+                    time,
+                    o,
+                    o.max(c) + base * 0.002,
+                    o.min(c) - base * 0.002,
+                    c,
+                    1000.0 + (i % 17) as f64 * 40.0,
+                )
+            })
+            .collect()
+    }
+
+    /// Der Wächter über [`PRICE_UNIT_INDICATORS`].
+    ///
+    /// Jeder Indikator des Katalogs wird gefüttert; liegen die gezeichneten
+    /// Linien überwiegend im Kursband der Eingabe, rechnet er in Preiseinheiten
+    /// und gehört als Overlay auf den Preischart. Gemessen wird über **alle**
+    /// Linien, nicht nur `value` — Ichimoku etwa legt in `value` die Wolkenbreite
+    /// ab und die Preise in `tenkan`, `kijun`, `senkou_a`, `senkou_b`.
+    ///
+    /// Die Schwelle liegt in einer breiten Lücke: der höchste Anteil unter den
+    /// Pane-Indikatoren ist `trend_relationship` mit 0,50 (eine Preislinie neben
+    /// einer Verhältniszahl), der niedrigste unter den Overlays liegt deutlich
+    /// darüber.
+    #[test]
+    fn the_overlay_list_matches_what_the_indicators_actually_compute() {
+        const BASE: f64 = 4321.0;
+        const PRICE_UNIT_THRESHOLD: f64 = 0.6;
+
+        let candles = probe_candles(400, BASE);
+        let low = candles.iter().map(|c| c.l).fold(f64::MAX, f64::min);
+        let high = candles.iter().map(|c| c.h).fold(f64::MIN, f64::max);
+
+        let mut missing = Vec::new();
+        let mut surplus = Vec::new();
+
+        for name in IndicatorSeries::available() {
+            let mut series = IndicatorSeries::new(&name, HashMap::new())
+                .unwrap_or_else(|e| panic!("{name} baut nicht mit Standardparametern: {e}"));
+            series.feed(&candles);
+
+            let values: Vec<f64> = series
+                .lines()
+                .flat_map(|line| line.points.iter().map(|(_, v)| *v))
+                .filter(|v| v.is_finite())
+                .collect();
+            assert!(
+                !values.is_empty(),
+                "{name} liefert nach 400 Kerzen keinen einzigen Wert"
+            );
+
+            let inside = values
+                .iter()
+                .filter(|v| **v >= low * 0.5 && **v <= high * 1.5)
+                .count();
+            let price_unit = inside as f64 / values.len() as f64 > PRICE_UNIT_THRESHOLD;
+            let listed = PRICE_UNIT_INDICATORS.contains(&name.as_str());
+
+            match (price_unit, listed) {
+                (true, false) => missing.push(name),
+                (false, true) => surplus.push(name),
+                _ => {}
+            }
+        }
+
+        assert!(
+            missing.is_empty(),
+            "rechnen in Preiseinheiten, stehen aber nicht in PRICE_UNIT_INDICATORS \
+             und landen deshalb in einem eigenen Pane statt auf dem Preischart: {missing:?}"
+        );
+        assert!(
+            surplus.is_empty(),
+            "stehen in PRICE_UNIT_INDICATORS, rechnen aber nicht in Preiseinheiten — \
+             als Overlay verzerren sie die Preisskala: {surplus:?}"
         );
     }
 
