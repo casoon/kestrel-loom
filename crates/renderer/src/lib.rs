@@ -5,7 +5,7 @@
 //! Canvas ist Sache von `kestrel-loom-wasm`.
 //!
 //! Indikator-Berechnung findet hier **nicht** statt — dafür ist `kestrel-chartkit`
-//! zuständig (siehe `plan/00-konzept.md`).
+//! zuständig (siehe `plan/spezifikation/00-konzept.md`).
 
 pub mod canvas;
 pub mod core;

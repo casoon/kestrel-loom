@@ -4,7 +4,7 @@
 //! umgerechnet, der Renderpfad bleibt derselbe.
 //!
 //! `loomchart` warb mit Heikin Ashi als Darstellung, hatte sie aber nie
-//! implementiert (siehe `plan/04-befunde.md` B5).
+//! implementiert (siehe `plan/spezifikation/04-befunde.md` B5).
 
 use super::types::Candle;
 

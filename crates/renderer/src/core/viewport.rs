@@ -11,7 +11,7 @@
 //! davon abgeleitet. Vorher interpolierte `time_to_x` linear über die Zeitspanne
 //! — eine 49-Stunden-Wochenendpause bekam damit denselben Pixelanteil wie 49
 //! Handelsstunden, und die Preislinie zog sichtbar darüber hinweg. Herleitung
-//! und Umbauplan: `plan/07-bar-index-achse.md`.
+//! und Modell: `plan/spezifikation/02-bar-index-achse.md`.
 
 use crate::core::bar_index::BarIndex;
 use crate::core::types::{Candle, Timeframe};
@@ -581,7 +581,7 @@ mod tests {
         assert_eq!(vp.price_to_y(150.0), 300.0);
     }
 
-    /// Der Befund aus `plan/07-bar-index-achse.md`: auf der Zeitachse bekam eine
+    /// Der Befund aus `plan/spezifikation/02-bar-index-achse.md`: auf der Zeitachse bekam eine
     /// 49-Stunden-Pause 49 Bar-Breiten Platz. Jetzt genau eine.
     #[test]
     fn a_trading_break_takes_exactly_one_bar_of_width() {

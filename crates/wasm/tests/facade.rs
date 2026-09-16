@@ -5,7 +5,7 @@
 //! Pixelverhältnis —, bleibt der Demo und der Einbindung vorbehalten.
 //!
 //! Bis 2026-09-09 hatte die Fassade gar keine Tests; der `resize`-Fehler
-//! (`plan/04-befunde.md` B4) fiel deshalb erst im Browser auf.
+//! (`plan/spezifikation/04-befunde.md` B4) fiel deshalb erst im Browser auf.
 
 use kestrel_loom_wasm::WasmChart;
 use wasm_bindgen_test::*;
@@ -156,7 +156,7 @@ fn candles_with_a_weekend(before: usize, after: usize) -> String {
     out
 }
 
-/// Der Befund aus `plan/07-bar-index-achse.md`: auf der Zeitachse bekam eine
+/// Der Befund aus `plan/spezifikation/02-bar-index-achse.md`: auf der Zeitachse bekam eine
 /// 49-Stunden-Pause 49 Bar-Breiten Platz, im Chart klaffte eine Lücke.
 #[wasm_bindgen_test]
 fn a_trading_break_does_not_open_a_gap() {

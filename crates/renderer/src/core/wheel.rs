@@ -8,12 +8,12 @@
 //! Vorher zoomte jedes Rad-Ereignis um feste 10 %, unabhängig von der
 //! Deltagröße. Eine Magic Mouse schickt pro Wischer dutzende kleine Ereignisse
 //! samt Nachlauf — das ergab dutzende 10-%-Schritte und einen unbrauchbaren
-//! Chart. Siehe `plan/09-scrolling.md`.
+//! Chart. Siehe `plan/spezifikation/03-eingaben-und-zeitleiste.md`.
 
 /// Ein Rad-Ereignis, so wie der Browser es liefert.
 ///
 /// Alle Werte werden hereingereicht, nichts wird aus der Umgebung geholt
-/// (`plan/06-anforderungen.md` A4) — deshalb trägt das Ereignis auch seinen
+/// (`plan/spezifikation/01-anforderungen.md` A4) — deshalb trägt das Ereignis auch seinen
 /// eigenen Zeitstempel.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct WheelInput {

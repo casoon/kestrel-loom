@@ -7,7 +7,7 @@
 //! Handelsplattformen, und so steht über einer Wochenendpause genau ein
 //! Tageswechsel statt zweier Beschriftungen ohne Bars dazwischen.
 //!
-//! Siehe `plan/07-bar-index-achse.md` M8.5.
+//! Siehe `plan/spezifikation/02-bar-index-achse.md` §5.
 
 use chrono::{DateTime, Datelike, Timelike};
 
@@ -257,7 +257,7 @@ mod tests {
         assert_eq!(day_changes(&ticks), vec![24], "{ticks:?}");
     }
 
-    /// Der Test aus `plan/07-bar-index-achse.md` M8.5: über einer Pause steht
+    /// Der Test aus `plan/spezifikation/02-bar-index-achse.md` §5: über einer Pause steht
     /// **ein** Tageswechsel, nicht zwei.
     ///
     /// Auf der Zeitachse hätten Samstag und Sonntag je eine Beschriftung

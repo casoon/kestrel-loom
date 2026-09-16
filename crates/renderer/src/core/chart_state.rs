@@ -485,7 +485,7 @@ mod dimension_tests {
         assert_eq!(s.viewport.dimensions.pixel_ratio, 2.0);
         assert!(
             s.is_dirty(),
-            "sonst bleibt der Canvas nach dem Umschalten leer — siehe plan/04-befunde.md B4"
+            "sonst bleibt der Canvas nach dem Umschalten leer — siehe plan/spezifikation/04-befunde.md B4"
         );
     }
 

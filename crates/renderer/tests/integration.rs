@@ -257,7 +257,7 @@ fn test_timeframe_scaling() {
         // Abstände in Unix-Sekunden — dieselbe Einheit wie `Candle.time`.
         // Vorher stand hier `duration_ms()`, was die Millisekunden-Ausgabe des
         // Generators gegen sich selbst prüfte statt gegen den dokumentierten
-        // Vertrag; siehe plan/05-befunde-zeiteinheit.md.
+        // Vertrag; siehe plan/spezifikation/04-befunde.md B3.
         for i in 1..candles.len() {
             let time_diff = candles[i].time - candles[i - 1].time;
             let expected_diff = tf.duration_secs();

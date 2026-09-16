@@ -2,7 +2,7 @@
 //!
 //! Gemessen wird, was heute existiert: Kerzenerzeugung, Viewport-Abbildung,
 //! Sichtbarkeitsfilter und der Zeichenbefehls-Strom der Werkzeuge. Der eigentliche
-//! Renderloop steckt noch in der WASM-Fassade (siehe plan/03-meilensteine.md, M2) —
+//! Renderloop steckte zur Zeit der Übernahme noch in der WASM-Fassade —
 //! sobald er im Kern liegt, gehört er hierher.
 //!
 //! Der frühere Bench aus `loomchart` maß `ChartRenderer`, also toten Code, der im

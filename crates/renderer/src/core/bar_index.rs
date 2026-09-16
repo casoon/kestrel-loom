@@ -9,7 +9,7 @@
 //! Export, Crosshair, Achsenbeschriftung) bleibt alles bei Unix-Sekunden;
 //! gerechnet wird in Indizes.
 //!
-//! Siehe `plan/07-bar-index-achse.md`.
+//! Siehe `plan/spezifikation/02-bar-index-achse.md`.
 
 use crate::core::Candle;
 

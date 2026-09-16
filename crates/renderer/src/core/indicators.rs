@@ -22,7 +22,7 @@ use crate::core::Candle;
 /// **Preiseinheiten** liegt — dann gehört sie auf den Preischart, sonst in ein
 /// eigenes Pane mit eigener Skala. Das ist eine Eigenschaft des Indikators, keine
 /// Darstellungsvorliebe, und gehört langfristig in Chartkits Katalog
-/// (siehe `plan/02-chartkit-vertrag.md`). Bis dahin steht sie hier — explizit
+/// (siehe `plan/spezifikation/05-chartkit-vertrag.md` §4a). Bis dahin steht sie hier — explizit
 /// aufgeführt statt aus Wertebereichen geraten: ein RSI auf einem Instrument, das
 /// um 50 notiert, wäre von einer Heuristik nicht von einem Preis zu unterscheiden.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
