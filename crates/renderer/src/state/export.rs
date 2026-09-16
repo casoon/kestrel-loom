@@ -11,18 +11,26 @@ pub struct ViewportExport {
 }
 
 impl Viewport {
+    /// Exportiert wird in **Zeit**, nicht in Bar-Indizes.
+    ///
+    /// Bar-Indizes sind nicht stabil: ein Export, der auf „Bar 412" zeigt,
+    /// zeigt nach der nächsten Datenlieferung woanders hin. Zeitstempel tun
+    /// das nicht — und alte Exporte bleiben lesbar.
     pub fn export(&self) -> ViewportExport {
+        let time = self.time_range();
         ViewportExport {
-            time_start: self.time.start,
-            time_end: self.time.end,
+            time_start: time.start,
+            time_end: time.end,
             price_min: self.price.min,
             price_max: self.price.max,
         }
     }
 
     pub fn import(&mut self, export: ViewportExport) {
-        self.time.start = export.time_start;
-        self.time.end = export.time_end;
+        self.set_time_range(crate::core::TimeRange {
+            start: export.time_start,
+            end: export.time_end,
+        });
         self.price.min = export.price_min;
         self.price.max = export.price_max;
     }
@@ -43,7 +51,7 @@ impl ChartState {
             version: env!("CARGO_PKG_VERSION").to_string(),
             timestamp: chrono::Utc::now().timestamp(),
             timeframe: format!("{:?}", self.timeframe),
-            candles: self.candles.clone(),
+            candles: self.candles().to_vec(),
             viewport: self.viewport.export(),
         };
 

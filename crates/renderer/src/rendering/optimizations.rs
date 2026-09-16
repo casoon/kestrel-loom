@@ -194,8 +194,8 @@ mod tests {
 
         // Create viewport showing candles 100-200
         let mut viewport = Viewport::new(800, 600);
-        viewport.time.start = 100 * 60000; // start time
-        viewport.time.end = 200 * 60000; // end time
+        viewport.sync_bars(&candles);
+        viewport.set_bars(100.0, 200.0);
 
         let visible = cull_candles(&candles, &viewport);
 

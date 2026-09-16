@@ -1,115 +1,172 @@
-//! Logical bar indexing and session-aware coordinate mapping.
+//! Logische Bar-Indizes — die Grundlage der sitzungsstetigen Achse.
 //!
-//! `BarIndex` maps timestamps to contiguous logical bar indices, eliminating
-//! weekend/session gaps from the x-axis. `BarCoordMapper` converts those
-//! indices to screen pixels independently of timestamps.
+//! Eine Zeitachse gibt einer 49-Stunden-Wochenendpause denselben Pixelanteil wie
+//! 49 Handelsstunden: im Chart klafft eine Lücke, und die Preislinie zieht
+//! sichtbar darüber hinweg. Handelsplattformen positionieren deshalb nach
+//! **Bar-Index**: jede Bar ist gleich breit, Pausen existieren nicht.
+//!
+//! `BarIndex` ist die Übersetzung zwischen beiden Welten. Nach außen (Werkzeuge,
+//! Export, Crosshair, Achsenbeschriftung) bleibt alles bei Unix-Sekunden;
+//! gerechnet wird in Indizes.
+//!
+//! Siehe `plan/07-bar-index-achse.md`.
 
 use crate::core::Candle;
 
-/// Maps timestamps to logical bar indices, handling gaps, sessions, and synthetic bars.
+/// Zeitstempel in Indexreihenfolge, plus die Bar-Dauer für alles außerhalb.
+#[derive(Debug, Clone, Default)]
 pub struct BarIndex {
-    /// Sorted list of (timestamp, bar_index) pairs.
-    entries: Vec<(i64, usize)>,
+    /// Aufsteigend sortiert; die Position **ist** der logische Index.
+    times: Vec<i64>,
+    /// Dauer einer Bar in Sekunden — nur zum Extrapolieren jenseits der Daten.
+    bar_duration_secs: i64,
 }
 
 impl BarIndex {
-    /// Build index from a sorted candle slice.
-    pub fn from_candles(candles: &[Candle]) -> Self {
-        let entries = candles
-            .iter()
-            .enumerate()
-            .map(|(i, c)| (c.time, i))
-            .collect();
-        Self { entries }
+    /// Baut den Index aus einem sortierten Kerzensatz.
+    pub fn from_candles(candles: &[Candle], bar_duration_secs: i64) -> Self {
+        Self {
+            times: candles.iter().map(|c| c.time).collect(),
+            bar_duration_secs: bar_duration_secs.max(1),
+        }
     }
 
-    /// Logical index for a timestamp (None if not found).
+    /// Leerer Index mit bekannter Bar-Dauer.
+    pub fn empty(bar_duration_secs: i64) -> Self {
+        Self {
+            times: Vec::new(),
+            bar_duration_secs: bar_duration_secs.max(1),
+        }
+    }
+
+    /// Setzt die Bar-Dauer (Zeitrahmenwechsel).
+    pub fn set_bar_duration(&mut self, bar_duration_secs: i64) {
+        self.bar_duration_secs = bar_duration_secs.max(1);
+    }
+
+    pub fn bar_duration_secs(&self) -> i64 {
+        self.bar_duration_secs
+    }
+
+    /// Hängt eine Bar an oder ersetzt die letzte, wenn der Zeitstempel gleich ist.
+    ///
+    /// Der Weg für den Live-Betrieb: `from_candles` bei jeder eintreffenden Bar
+    /// wäre eine O(n)-Kopie je Tick.
+    pub fn push_bar(&mut self, time: i64) {
+        match self.times.last() {
+            Some(&last) if last == time => {}
+            Some(&last) if last > time => {
+                // Rückläufiger Zeitstempel: der Satz ist nicht mehr sortiert,
+                // also neu aufbauen statt eine kaputte Ordnung zu behalten.
+                self.times.push(time);
+                self.times.sort_unstable();
+                self.times.dedup();
+            }
+            _ => self.times.push(time),
+        }
+    }
+
+    /// Exakter Index eines Zeitstempels.
     pub fn time_to_index(&self, time: i64) -> Option<usize> {
-        self.entries
-            .binary_search_by_key(&time, |&(t, _)| t)
-            .ok()
-            .map(|pos| self.entries[pos].1)
+        self.times.binary_search(&time).ok()
     }
 
-    /// Timestamp for a logical index.
+    /// Zeitstempel eines Index — O(1).
     pub fn index_to_time(&self, index: usize) -> Option<i64> {
-        // entries are stored in ascending index order (from_candles guarantees this)
-        self.entries
-            .iter()
-            .find(|&&(_, i)| i == index)
-            .map(|&(t, _)| t)
+        self.times.get(index).copied()
     }
 
-    /// Total bar count.
     pub fn len(&self) -> usize {
-        self.entries.len()
+        self.times.len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
+        self.times.is_empty()
     }
 
-    /// Visible bar range (inclusive start, exclusive end) for a time window [start, end].
+    /// Erster und letzter Zeitstempel.
+    pub fn span(&self) -> Option<(i64, i64)> {
+        match (self.times.first(), self.times.last()) {
+            (Some(&a), Some(&b)) => Some((a, b)),
+            _ => None,
+        }
+    }
+
+    /// Sichtbarer Bar-Bereich (einschließlich Start, ausschließlich Ende) für ein
+    /// Zeitfenster.
     ///
-    /// Returns `(0, 0)` when no bars fall within the window.
+    /// Gibt `(0, 0)`, wenn keine Bar im Fenster liegt.
     pub fn visible_range(&self, start: i64, end: i64) -> (usize, usize) {
-        if self.entries.is_empty() {
-            return (0, 0);
-        }
-
-        // First entry whose timestamp >= start
-        let first = self.entries.partition_point(|&(t, _)| t < start);
-
-        // First entry whose timestamp > end
-        let last = self.entries.partition_point(|&(t, _)| t <= end);
-
+        let first = self.times.partition_point(|&t| t < start);
+        let last = self.times.partition_point(|&t| t <= end);
         if first >= last {
-            return (0, 0);
-        }
-
-        let start_idx = self.entries[first].1;
-        let end_idx = self.entries[last - 1].1 + 1; // exclusive
-        (start_idx, end_idx)
-    }
-}
-
-/// Converts a logical bar index to a screen x-coordinate, independent of timestamps.
-pub struct BarCoordMapper {
-    /// Pixels per bar.
-    bar_width: f64,
-    /// First visible bar index (may be negative when panned past the beginning).
-    offset: i64,
-    /// Canvas width in pixels.
-    canvas_width: u32,
-}
-
-impl BarCoordMapper {
-    pub fn new(bar_width: f64, offset: i64, canvas_width: u32) -> Self {
-        Self {
-            bar_width,
-            offset,
-            canvas_width,
+            (0, 0)
+        } else {
+            (first, last)
         }
     }
 
-    /// Center x-coordinate for `bar_index`.
-    pub fn bar_to_x(&self, bar_index: usize) -> f64 {
-        (bar_index as i64 - self.offset) as f64 * self.bar_width + self.bar_width / 2.0
+    /// Fraktionaler Index eines Zeitstempels — **die Funktion, an der alles hängt.**
+    ///
+    /// - Zeit liegt auf einer Bar → deren Index.
+    /// - Zeit liegt *zwischen* zwei Bars → linear zwischen den Nachbarindizes.
+    ///   Hier verschwindet die Pause: jeder Zeitpunkt im Wochenende bildet auf das
+    ///   Intervall `[freitag, montag]` ab, also auf **eine** Bar-Breite statt auf
+    ///   49 Stunden.
+    /// - Zeit liegt außerhalb → über die Bar-Dauer extrapoliert, damit Werkzeuge
+    ///   und die Zeichenfläche rechts vom letzten Bar weiter funktionieren.
+    ///
+    /// Ohne Daten ist der Index leer; dann bleibt nur die Extrapolation ab 0.
+    pub fn time_to_fractional_index(&self, time: i64) -> f64 {
+        let n = self.times.len();
+        if n == 0 {
+            return 0.0;
+        }
+
+        // Erste Position mit times[pos] >= time
+        let pos = self.times.partition_point(|&t| t < time);
+
+        if pos == n {
+            let last = self.times[n - 1];
+            return (n - 1) as f64 + (time - last) as f64 / self.bar_duration_secs as f64;
+        }
+        if self.times[pos] == time {
+            return pos as f64;
+        }
+        if pos == 0 {
+            let first = self.times[0];
+            return (time - first) as f64 / self.bar_duration_secs as f64;
+        }
+
+        let before = self.times[pos - 1];
+        let after = self.times[pos];
+        let width = (after - before) as f64;
+        (pos - 1) as f64 + (time - before) as f64 / width
     }
 
-    /// Bar index (can be negative when x is left of the visible area) for pixel `x`.
-    pub fn x_to_bar(&self, x: f64) -> i64 {
-        ((x - self.bar_width / 2.0) / self.bar_width) as i64 + self.offset
-    }
-
-    /// Anzahl Bars, die auf die Zeichenfläche passen — anders als
-    /// `Viewport::visible_bars` unabhängig von Zeitstempeln und damit auch bei
-    /// Handelspausen korrekt.
-    pub fn visible_bars(&self) -> usize {
-        if self.bar_width <= 0.0 {
+    /// Gegenrichtung zu [`Self::time_to_fractional_index`] — für Crosshair,
+    /// Achsenbeschriftung und Export.
+    pub fn fractional_index_to_time(&self, index: f64) -> i64 {
+        let n = self.times.len();
+        if n == 0 {
             return 0;
         }
-        (self.canvas_width as f64 / self.bar_width).ceil() as usize
+
+        if index <= 0.0 {
+            return self.times[0] + (index * self.bar_duration_secs as f64).round() as i64;
+        }
+        let last_index = (n - 1) as f64;
+        if index >= last_index {
+            return self.times[n - 1]
+                + ((index - last_index) * self.bar_duration_secs as f64).round() as i64;
+        }
+
+        let floor = index.floor();
+        let frac = index - floor;
+        let i = floor as usize;
+        let before = self.times[i];
+        let after = self.times[i + 1];
+        before + ((after - before) as f64 * frac).round() as i64
     }
 }
 
@@ -117,128 +174,148 @@ impl BarCoordMapper {
 mod tests {
     use super::*;
 
-    fn make_candle(time: i64) -> Candle {
-        Candle::new(time, 1.0, 2.0, 0.5, 1.5, 100.0)
+    const H1: i64 = 3600;
+
+    fn index_from(times: &[i64], duration: i64) -> BarIndex {
+        let candles: Vec<Candle> = times
+            .iter()
+            .map(|&t| Candle::new(t, 1.0, 2.0, 0.5, 1.5, 100.0))
+            .collect();
+        BarIndex::from_candles(&candles, duration)
     }
 
-    // --- BarIndex ---
+    /// Ein Handelstag Mo–Fr, dann 49 Stunden Pause, dann geht es weiter.
+    fn weekend_index() -> BarIndex {
+        let mut times: Vec<i64> = (0..10).map(|i| i * H1).collect();
+        let friday_close = times[9];
+        times.extend((1..=5).map(|i| friday_close + 49 * H1 + i * H1));
+        index_from(&times, H1)
+    }
 
     #[test]
-    fn test_empty_index() {
-        let idx = BarIndex::from_candles(&[]);
+    fn an_empty_index_has_no_positions() {
+        let idx = BarIndex::empty(H1);
         assert!(idx.is_empty());
-        assert_eq!(idx.len(), 0);
         assert_eq!(idx.time_to_index(0), None);
         assert_eq!(idx.index_to_time(0), None);
         assert_eq!(idx.visible_range(0, 1000), (0, 0));
+        assert_eq!(idx.span(), None);
     }
 
     #[test]
-    fn test_regular_spacing() {
-        let candles: Vec<Candle> = (0..5).map(|i| make_candle(i * 300)).collect();
-        let idx = BarIndex::from_candles(&candles);
-
-        assert_eq!(idx.len(), 5);
+    fn exact_timestamps_map_to_their_position() {
+        let idx = index_from(&[0, 300, 600, 900, 1200], 300);
         assert_eq!(idx.time_to_index(0), Some(0));
-        assert_eq!(idx.time_to_index(300), Some(1));
-        assert_eq!(idx.time_to_index(1200), Some(4));
-        assert_eq!(idx.time_to_index(500), None); // not a bar boundary
-
-        assert_eq!(idx.index_to_time(0), Some(0));
+        assert_eq!(idx.time_to_index(900), Some(3));
+        assert_eq!(idx.time_to_index(500), None);
         assert_eq!(idx.index_to_time(4), Some(1200));
         assert_eq!(idx.index_to_time(5), None);
     }
 
     #[test]
-    fn test_gaps() {
-        // Bars at 0, 300, 900 — gap between index 1 and 2 (missing 600)
-        let times = [0i64, 300, 900];
-        let candles: Vec<Candle> = times.iter().map(|&t| make_candle(t)).collect();
-        let idx = BarIndex::from_candles(&candles);
-
-        assert_eq!(idx.len(), 3);
-        assert_eq!(idx.time_to_index(300), Some(1));
-        assert_eq!(idx.time_to_index(600), None); // gap — not in index
-        assert_eq!(idx.time_to_index(900), Some(2));
-
-        // Logical indices are still 0,1,2 — no hole in the index itself
-        assert_eq!(idx.index_to_time(2), Some(900));
+    fn a_timestamp_on_a_bar_has_an_integer_index() {
+        let idx = index_from(&[0, 300, 600], 300);
+        assert_eq!(idx.time_to_fractional_index(300), 1.0);
     }
 
     #[test]
-    fn test_visible_range_full_overlap() {
-        let candles: Vec<Candle> = (0..5).map(|i| make_candle(i * 300)).collect();
-        let idx = BarIndex::from_candles(&candles);
-
-        // Window covers all bars
-        let (s, e) = idx.visible_range(0, 1200);
-        assert_eq!(s, 0);
-        assert_eq!(e, 5);
+    fn a_timestamp_between_bars_interpolates() {
+        let idx = index_from(&[0, 300, 600], 300);
+        assert_eq!(idx.time_to_fractional_index(150), 0.5);
+        assert_eq!(idx.time_to_fractional_index(450), 1.5);
     }
 
     #[test]
-    fn test_visible_range_partial_overlap() {
-        let candles: Vec<Candle> = (0..5).map(|i| make_candle(i * 300)).collect();
-        let idx = BarIndex::from_candles(&candles);
-
-        // Window covers bars at 300, 600, 900 (indices 1..3)
-        let (s, e) = idx.visible_range(300, 900);
-        assert_eq!(s, 1);
-        assert_eq!(e, 4); // exclusive: bar at 900 is index 3, so end = 4
+    fn a_timestamp_beyond_the_last_bar_extrapolates() {
+        let idx = index_from(&[0, 300, 600], 300);
+        assert_eq!(idx.time_to_fractional_index(900), 3.0);
+        assert_eq!(idx.time_to_fractional_index(1050), 3.5);
     }
 
     #[test]
-    fn test_visible_range_no_overlap() {
-        let candles: Vec<Candle> = (0..3).map(|i| make_candle(i * 300)).collect();
-        let idx = BarIndex::from_candles(&candles);
-
-        let (s, e) = idx.visible_range(5000, 9000);
-        assert_eq!((s, e), (0, 0));
+    fn a_timestamp_before_the_first_bar_is_negative() {
+        let idx = index_from(&[1000, 1300, 1600], 300);
+        assert_eq!(idx.time_to_fractional_index(700), -1.0);
     }
 
-    // --- BarCoordMapper ---
-
+    /// Der Kern des ganzen Umbaus: eine 49-Stunden-Pause darf genau eine
+    /// Bar-Breite einnehmen, nicht 49.
     #[test]
-    fn test_bar_to_x_basic() {
-        // bar_width=10, offset=0 → bar 0 centers at x=5, bar 1 at x=15
-        let mapper = BarCoordMapper::new(10.0, 0, 800);
-        assert_eq!(mapper.bar_to_x(0), 5.0);
-        assert_eq!(mapper.bar_to_x(1), 15.0);
-        assert_eq!(mapper.bar_to_x(9), 95.0);
-    }
+    fn a_trading_break_is_exactly_one_bar_wide() {
+        let idx = weekend_index();
 
-    #[test]
-    fn test_bar_to_x_with_offset() {
-        // offset=5 means the 5th bar is the first visible one (x=5)
-        let mapper = BarCoordMapper::new(10.0, 5, 800);
-        assert_eq!(mapper.bar_to_x(5), 5.0);
-        assert_eq!(mapper.bar_to_x(6), 15.0);
-    }
+        let friday = idx.time_to_fractional_index(9 * H1);
+        let monday = idx.time_to_fractional_index(9 * H1 + 50 * H1);
+        assert_eq!(friday, 9.0);
+        assert_eq!(monday, 10.0);
+        assert_eq!(
+            monday - friday,
+            1.0,
+            "über die Pause hinweg liegt genau eine Bar-Breite"
+        );
 
-    #[test]
-    fn test_x_to_bar_basic() {
-        let mapper = BarCoordMapper::new(10.0, 0, 800);
-        assert_eq!(mapper.x_to_bar(5.0), 0);
-        assert_eq!(mapper.x_to_bar(15.0), 1);
+        // Mitten im Wochenende: auf halber Strecke zwischen den beiden Bars.
+        let saturday = idx.time_to_fractional_index(9 * H1 + 25 * H1);
+        assert!(
+            (saturday - 9.5).abs() < 0.02,
+            "Mitte der Pause liegt in der Mitte der einen Bar-Breite, war {saturday}"
+        );
     }
 
     #[test]
-    fn test_x_to_bar_negative() {
-        // offset=0, bar_width=10 → x<5 maps to bar -1 (left of visible area)
-        let mapper = BarCoordMapper::new(10.0, 0, 800);
-        assert_eq!(mapper.x_to_bar(-5.0), -1);
-    }
-
-    #[test]
-    fn test_round_trip() {
-        let mapper = BarCoordMapper::new(8.0, 3, 800);
-        for bar_index in 3usize..20 {
-            let x = mapper.bar_to_x(bar_index);
-            let recovered = mapper.x_to_bar(x);
+    fn time_survives_the_round_trip() {
+        let idx = weekend_index();
+        for &time in &[0, 3 * H1, 9 * H1, 9 * H1 + 50 * H1, 9 * H1 + 54 * H1] {
+            let f = idx.time_to_fractional_index(time);
             assert_eq!(
-                recovered, bar_index as i64,
-                "round-trip failed for bar {bar_index}"
+                idx.fractional_index_to_time(f),
+                time,
+                "Rundgang für {time} über Index {f}"
             );
         }
+    }
+
+    #[test]
+    fn the_round_trip_also_holds_outside_the_data() {
+        let idx = index_from(&[1000, 1300, 1600], 300);
+        for &time in &[100, 400, 1900, 3000] {
+            let f = idx.time_to_fractional_index(time);
+            assert_eq!(idx.fractional_index_to_time(f), time);
+        }
+    }
+
+    #[test]
+    fn visible_range_covers_the_window() {
+        let idx = index_from(&[0, 300, 600, 900, 1200], 300);
+        assert_eq!(idx.visible_range(0, 1200), (0, 5));
+        assert_eq!(idx.visible_range(300, 900), (1, 4));
+        assert_eq!(idx.visible_range(5000, 9000), (0, 0));
+    }
+
+    #[test]
+    fn a_new_bar_appends_in_place() {
+        let mut idx = index_from(&[0, 300], 300);
+        idx.push_bar(600);
+        assert_eq!(idx.len(), 3);
+        assert_eq!(idx.time_to_fractional_index(600), 2.0);
+    }
+
+    #[test]
+    fn repeating_the_last_bar_does_not_grow_the_index() {
+        let mut idx = index_from(&[0, 300], 300);
+        idx.push_bar(300);
+        assert_eq!(
+            idx.len(),
+            2,
+            "eine laufende Bar wird aktualisiert, nicht angehängt"
+        );
+    }
+
+    #[test]
+    fn an_out_of_order_bar_restores_the_ordering() {
+        let mut idx = index_from(&[0, 600], 300);
+        idx.push_bar(300);
+        assert_eq!(idx.index_to_time(1), Some(300));
+        assert_eq!(idx.index_to_time(2), Some(600));
     }
 }

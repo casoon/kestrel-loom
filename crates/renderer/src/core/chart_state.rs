@@ -1,7 +1,7 @@
 //! Chart State Management - Central state container for the chart engine
 
 use super::types::{Candle, SessionConfig, Timeframe};
-use super::viewport::{PriceRange, TimeRange, Viewport};
+use super::viewport::{BarRange, PriceRange, TimeRange, Viewport};
 use crate::primitives::{CandleStyle, Color};
 
 /// Magnet/snap mode for drawing tool placement
@@ -31,6 +31,8 @@ pub struct ChartOptions {
     pub show_volume: bool,
     pub sessions: Vec<SessionConfig>,
     pub show_sessions: bool,
+    /// Zeitleiste am unteren Rand.
+    pub show_scrollbar: bool,
 }
 
 impl Default for ChartOptions {
@@ -49,6 +51,7 @@ impl Default for ChartOptions {
             show_volume: true,
             sessions: Vec::new(),
             show_sessions: false,
+            show_scrollbar: true,
         }
     }
 }
@@ -93,15 +96,31 @@ pub enum InteractionState {
         initial_price_range: PriceRange, // Snapshot of price range
     },
     ScalingTime {
-        start_x: f64,                  // X coordinate from start
-        initial_time_range: TimeRange, // Snapshot of time range
+        start_x: f64,           // X coordinate from start
+        initial_bars: BarRange, // Schnappschuss des Bar-Ausschnitts
+    },
+    /// Der Griff der Zeitleiste wird gezogen.
+    DraggingScrollbar {
+        /// Wo im Griff gepackt wurde, in Bars ab dessen linkem Rand — damit der
+        /// Griff nicht unter dem Zeiger wegspringt.
+        grab_offset_bars: f64,
+    },
+    /// Ein Rand des Griffs wird gezogen (zoomen).
+    ResizingScrollbar {
+        /// `true` = linker Rand.
+        start_edge: bool,
     },
 }
 
 /// Main chart state container
 pub struct ChartState {
     pub viewport: Viewport,
-    pub candles: Vec<Candle>,
+    /// Der Kerzensatz. **Privat**, weil der Bar-Index des Viewports mit ihm
+    /// synchron bleiben muss: jeder Schreibweg geht über [`ChartState::set_candles`]
+    /// oder [`ChartState::add_candle`], und beide schreiben den Index mit fort.
+    /// Dasselbe Muster wie `apply_dimensions` gegen B4 — ein Desync ist damit
+    /// nicht formulierbar, statt nur unwahrscheinlich.
+    candles: Vec<Candle>,
     pub options: ChartOptions,
     pub crosshair: CrosshairState,
     pub interaction: InteractionState,
@@ -115,7 +134,7 @@ pub struct ChartState {
 impl ChartState {
     pub fn new(width: u32, height: u32, timeframe: Timeframe) -> Self {
         let mut viewport = Viewport::new(width, height);
-        viewport.timeframe = timeframe; // Set timeframe in viewport
+        viewport.set_timeframe(timeframe);
 
         Self {
             viewport,
@@ -131,9 +150,15 @@ impl ChartState {
         }
     }
 
+    /// Lesezugriff auf den Kerzensatz.
+    pub fn candles(&self) -> &[Candle] {
+        &self.candles
+    }
+
     /// Set candle data and auto-fit viewport
     pub fn set_candles(&mut self, candles: Vec<Candle>) {
         self.candles = candles;
+        self.viewport.sync_bars(&self.candles);
         if !self.candles.is_empty() {
             self.fit_to_data();
         }
@@ -142,6 +167,7 @@ impl ChartState {
 
     /// Add a single candle (for real-time updates)
     pub fn add_candle(&mut self, candle: Candle) {
+        let time = candle.time;
         // Check if we should update the last candle or add a new one
         if let Some(last) = self.candles.last_mut() {
             if last.time == candle.time {
@@ -152,6 +178,9 @@ impl ChartState {
         } else {
             self.candles.push(candle);
         }
+        // Fortschreiben statt neu aufbauen: `sync_bars` wäre je Tick eine
+        // O(n)-Kopie des gesamten Zeitstempelsatzes.
+        self.viewport.push_bar(time);
         self.mark_dirty();
     }
 
@@ -208,10 +237,37 @@ impl ChartState {
         self.mark_dirty();
     }
 
-    /// Pan the viewport
+    /// Pan the viewport.
+    ///
+    /// Vertikales Verschieben sperrt die Preisskala — sonst zöge das nächste
+    /// `fit_to_data()` (jede eintreffende Kerze) den Ausschnitt sofort wieder
+    /// zurück. `reset_view()` hebt die Sperre auf.
     pub fn pan(&mut self, delta_x: i32, delta_y: i32) {
         self.viewport.pan(delta_x, delta_y);
+        if delta_y != 0 {
+            self.viewport.price_locked = true;
+        }
         self.mark_dirty();
+    }
+
+    /// Setzt den sichtbaren Bar-Ausschnitt und markiert den Zustand als verändert.
+    pub fn set_bars(&mut self, first: f64, last: f64) {
+        self.viewport.set_bars(first, last);
+        self.mark_dirty();
+    }
+
+    /// Wird gerade an der Zeitleiste gezogen?
+    pub fn is_scrolling(&self) -> bool {
+        matches!(
+            self.interaction,
+            InteractionState::DraggingScrollbar { .. } | InteractionState::ResizingScrollbar { .. }
+        )
+    }
+
+    /// Setzt die Ansicht zurück: Preissperre lösen und auf die Daten einpassen.
+    pub fn reset_view(&mut self) {
+        self.viewport.price_locked = false;
+        self.fit_to_data();
     }
 
     /// Zoom the viewport
@@ -236,13 +292,27 @@ impl ChartState {
         self.mark_dirty();
     }
 
-    /// Get candles visible in current viewport
-    pub fn visible_candles(&self) -> Vec<&Candle> {
-        let time_range = &self.viewport.time;
-        self.candles
-            .iter()
-            .filter(|c| c.time >= time_range.start && c.time <= time_range.end)
-            .collect()
+    /// Sichtbarer Bar-Bereich als Index-Paar (einschließlich Start, ausschließlich
+    /// Ende), auf den Kerzensatz geklemmt.
+    pub fn visible_bar_range(&self) -> (usize, usize) {
+        let n = self.candles.len();
+        if n == 0 {
+            return (0, 0);
+        }
+        let bars = self.viewport.bars();
+        let first = bars.first.floor().clamp(0.0, n as f64) as usize;
+        let last = (bars.last.ceil() + 1.0).clamp(0.0, n as f64) as usize;
+        (first.min(last), last)
+    }
+
+    /// Get candles visible in current viewport.
+    ///
+    /// Ein Slice, keine Sammlung von Referenzen: auf der Bar-Achse sind die
+    /// sichtbaren Kerzen ein zusammenhängender Abschnitt, also braucht es dafür
+    /// weder einen Filterdurchlauf über alle Kerzen noch eine Allokation.
+    pub fn visible_candles(&self) -> &[Candle] {
+        let (first, last) = self.visible_bar_range();
+        &self.candles[first..last]
     }
 
     /// Find candle at a given time
@@ -250,29 +320,31 @@ impl ChartState {
         self.candles.iter().find(|c| c.time == time)
     }
 
-    /// Find closest candle to a given x coordinate
+    /// Kerze an einer Bildschirmspalte — ein Direktzugriff statt einer Zeitsuche.
+    ///
+    /// Vorher suchte diese Funktion nach Kerzen innerhalb einer halben Bar-Dauer
+    /// **in Zeit**. Neben einer Handelspause traf das die falsche Kerze oder gar
+    /// keine, weil dort zwischen zwei benachbarten Bars Stunden liegen.
     pub fn candle_at_x(&self, x: f64) -> Option<&Candle> {
-        let time = self.viewport.x_to_time(x);
-        let bar_duration = self.timeframe.duration_secs();
-
-        // Find closest candle within half bar width
-        self.candles
-            .iter()
-            .filter(|c| (c.time - time).abs() < bar_duration / 2)
-            .min_by_key(|c| (c.time - time).abs())
+        let bar = self.viewport.x_to_bar(x).round();
+        if bar < 0.0 {
+            return None;
+        }
+        self.candles.get(bar as usize)
     }
 
     /// Find candle at position with hit-testing (includes Y coordinate check)
     pub fn candle_at_position(&self, x: f64, y: f64) -> Option<&Candle> {
         let bar_width = self.viewport.bar_width();
+        let candle = self.candle_at_x(x)?;
 
-        self.visible_candles().into_iter().find(|candle| {
-            let candle_x = self.viewport.time_to_x(candle.time);
-            let high_y = self.viewport.price_to_y(candle.h);
-            let low_y = self.viewport.price_to_y(candle.l);
+        let candle_x = self.viewport.time_to_x(candle.time);
+        let high_y = self.viewport.price_to_y(candle.h);
+        let low_y = self.viewport.price_to_y(candle.l);
 
-            candle.in_range(x, y, candle_x, bar_width, high_y, low_y)
-        })
+        candle
+            .in_range(x, y, candle_x, bar_width, high_y, low_y)
+            .then_some(candle)
     }
 
     /// Get OHLC data at crosshair position (for tooltip)
@@ -363,8 +435,9 @@ mod tests {
 
         state.set_candles(candles);
         assert_eq!(state.candles.len(), 2);
-        assert!(state.viewport.time.start <= 1000);
-        assert!(state.viewport.time.end >= 1300);
+        let time = state.viewport.time_range();
+        assert!(time.start <= 1000);
+        assert!(time.end >= 1300);
     }
 
     #[test]

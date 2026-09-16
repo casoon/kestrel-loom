@@ -226,7 +226,7 @@ mod tests {
     #[test]
     fn a_scene_polyline_becomes_a_draw_command() {
         let state = state_with_candles();
-        let (start, end) = (state.candles[0].time, state.candles[50].time);
+        let (start, end) = (state.candles()[0].time, state.candles()[50].time);
 
         let mut pane = Pane::new("p", 1.0);
         pane.upsert_object(SceneObject::new(
@@ -263,7 +263,7 @@ mod tests {
                 z,
                 1.0,
                 SceneObjectKind::Text {
-                    x: state.candles[0].time as f64,
+                    x: state.candles()[0].time as f64,
                     y: 100.0,
                     content: id.to_string(),
                     color: "#ffffff".to_string(),
@@ -290,11 +290,11 @@ mod tests {
     #[test]
     fn artifacts_become_scene_objects() {
         let state = state_with_candles();
-        let range = (state.candles[0].time, state.candles[119].time);
+        let range = (state.candles()[0].time, state.candles()[119].time);
 
         let artifacts = vec![
             Artifact::Pivot(PivotArtifact {
-                timestamp: state.candles[40].time,
+                timestamp: state.candles()[40].time,
                 price: 101.0,
                 is_high: true,
                 confirmed: true,

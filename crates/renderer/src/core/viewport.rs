@@ -5,14 +5,41 @@
 //! - Data space (time, price)
 //! - Logical space (bar indices)
 //! - Screen space (pixels)
+//!
+//! **Positioniert wird nach Bar-Index, nicht nach Zeit** (M8, seit 2026-09-16).
+//! Der sichtbare Ausschnitt ist ein Bereich fraktionaler Bar-Indizes; Zeit ist
+//! davon abgeleitet. Vorher interpolierte `time_to_x` linear über die Zeitspanne
+//! — eine 49-Stunden-Wochenendpause bekam damit denselben Pixelanteil wie 49
+//! Handelsstunden, und die Preislinie zog sichtbar darüber hinweg. Herleitung
+//! und Umbauplan: `plan/07-bar-index-achse.md`.
 
-use crate::core::types::Timeframe;
+use crate::core::bar_index::BarIndex;
+use crate::core::types::{Candle, Timeframe};
 
 /// Time range in seconds (unix timestamp)
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TimeRange {
     pub start: i64,
     pub end: i64,
+}
+
+/// Sichtbarer Ausschnitt in fraktionalen Bar-Indizes.
+///
+/// `f64` statt `usize` aus drei Gründen: Zoom bleibt stufenlos, `first` darf
+/// negativ und `last` größer als die Barzahl werden (der Leerraum links und
+/// rechts), und Werkzeuge ankern auf Zeiten, die keine Bar sind.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BarRange {
+    /// Index am linken Rand.
+    pub first: f64,
+    /// Index am rechten Rand.
+    pub last: f64,
+}
+
+impl BarRange {
+    pub fn span(&self) -> f64 {
+        self.last - self.first
+    }
 }
 
 /// Price range
@@ -40,17 +67,26 @@ pub enum ViewportScaleMode {
     Indexed,
 }
 
+/// Kleinste und größte Zahl sichtbarer Bars.
+const MIN_VISIBLE_BARS: f64 = 5.0;
+const MAX_VISIBLE_BARS: f64 = 5000.0;
+
 /// Viewport state
 #[derive(Debug, Clone)]
 pub struct Viewport {
-    /// Visible time range
-    pub time: TimeRange,
+    /// Sichtbarer Ausschnitt in Bar-Indizes — der Zustand, aus dem alles folgt.
+    bars: BarRange,
+    /// Zeitstempel je Bar. Nur über [`Viewport::sync_bars`] und
+    /// [`Viewport::push_bar`] zu ändern, damit Index und Kerzensatz nicht
+    /// auseinanderlaufen können — dasselbe Muster wie `apply_dimensions`.
+    index: BarIndex,
     /// Visible price range
     pub price: PriceRange,
     /// Screen dimensions
     pub dimensions: Dimensions,
-    /// Timeframe (for bar spacing)
-    pub timeframe: Timeframe,
+    /// Timeframe (for bar spacing). Privat — nur über
+    /// [`Viewport::set_timeframe`], damit die Bar-Dauer des Index mitzieht.
+    timeframe: Timeframe,
     /// Use logarithmic price scale
     pub log_scale: bool,
     /// When true, fit_to_data() leaves the price range unchanged
@@ -70,8 +106,13 @@ pub struct Viewport {
 impl Viewport {
     /// Create new viewport
     pub fn new(width: u32, height: u32) -> Self {
+        let timeframe = Timeframe::M5;
         Self {
-            time: TimeRange { start: 0, end: 0 },
+            bars: BarRange {
+                first: 0.0,
+                last: 1.0,
+            },
+            index: BarIndex::empty(timeframe.duration_secs()),
             price: PriceRange {
                 min: 0.0,
                 max: 100.0,
@@ -81,7 +122,7 @@ impl Viewport {
                 height,
                 pixel_ratio: 1.0,
             },
-            timeframe: Timeframe::M5,
+            timeframe,
             log_scale: false,
             price_locked: false,
             bar_spacing_extra: 0.0,
@@ -101,15 +142,107 @@ impl Viewport {
         };
     }
 
-    /// Fit viewport to data range
-    pub fn fit_to_data(&mut self, time_range: TimeRange, price_range: PriceRange) {
-        let duration = time_range.end - time_range.start;
-        let padding = (duration as f64 * 0.05) as i64;
+    /// Setzt den Zeitrahmen — und damit die Bar-Dauer, mit der außerhalb der
+    /// Daten extrapoliert wird.
+    pub fn timeframe(&self) -> Timeframe {
+        self.timeframe
+    }
 
-        self.time = TimeRange {
-            start: time_range.start - padding,
-            end: time_range.end + padding,
+    pub fn set_timeframe(&mut self, timeframe: Timeframe) {
+        self.timeframe = timeframe;
+        self.index.set_bar_duration(timeframe.duration_secs());
+    }
+
+    // --- Bar-Index: der einzige Schreibweg ---
+
+    /// Schreibt den Bar-Index auf den Kerzensatz fort.
+    pub fn sync_bars(&mut self, candles: &[Candle]) {
+        self.index = BarIndex::from_candles(candles, self.timeframe.duration_secs());
+    }
+
+    /// Hängt eine einzelne Bar an (Live-Betrieb).
+    pub fn push_bar(&mut self, time: i64) {
+        self.index.push_bar(time);
+    }
+
+    /// Lesezugriff auf den Index — für Achsenbeschriftung und Treffererkennung.
+    pub fn bar_index(&self) -> &BarIndex {
+        &self.index
+    }
+
+    /// Zahl der indizierten Bars.
+    pub fn bar_count(&self) -> usize {
+        self.index.len()
+    }
+
+    /// Sichtbarer Ausschnitt in Bar-Indizes.
+    pub fn bars(&self) -> BarRange {
+        self.bars
+    }
+
+    /// Setzt den sichtbaren Ausschnitt, geklemmt auf sinnvolle Bar-Zahlen.
+    pub fn set_bars(&mut self, first: f64, last: f64) {
+        let span = (last - first).clamp(MIN_VISIBLE_BARS, MAX_VISIBLE_BARS);
+        // Mittelpunkt halten, wenn die Klemmung greift.
+        let center = (first + last) / 2.0;
+        self.bars = BarRange {
+            first: center - span / 2.0,
+            last: center + span / 2.0,
         };
+    }
+
+    /// Leerraum rechts vom letzten Bar, in Bars.
+    ///
+    /// Fällt aus dem fraktionalen Modell kostenlos an: `last` darf größer als
+    /// die Barzahl werden. Handelsplattformen bieten diesen Platz an, um
+    /// Werkzeuge in die Zukunft zu zeichnen.
+    pub fn right_offset(&self) -> f64 {
+        self.bars.last - (self.index.len() as f64 - 0.5)
+    }
+
+    /// Setzt den Leerraum rechts, ohne den Zoom zu ändern.
+    pub fn set_right_offset(&mut self, bars: f64) {
+        let span = self.bars.span();
+        let last = self.index.len() as f64 - 0.5 + bars;
+        self.bars = BarRange {
+            first: last - span,
+            last,
+        };
+    }
+
+    // --- Zeit als abgeleitete Sicht ---
+
+    /// Sichtbares Zeitfenster — abgeleitet aus dem Bar-Ausschnitt.
+    pub fn time_range(&self) -> TimeRange {
+        TimeRange {
+            start: self.index.fractional_index_to_time(self.bars.first),
+            end: self.index.fractional_index_to_time(self.bars.last),
+        }
+    }
+
+    /// Setzt den Ausschnitt über ein Zeitfenster (Import, externe Steuerung).
+    pub fn set_time_range(&mut self, range: TimeRange) {
+        let first = self.index.time_to_fractional_index(range.start);
+        let last = self.index.time_to_fractional_index(range.end);
+        self.set_bars(first, last);
+    }
+
+    /// Fit viewport to data range
+    ///
+    /// Das Zeitfenster wird nur noch als Auswahl der Bars gelesen; die Ränder
+    /// entstehen als Bruchteil der **Barzahl**, nicht der Zeitspanne.
+    pub fn fit_to_data(&mut self, time_range: TimeRange, price_range: PriceRange) {
+        debug_assert!(
+            !self.index.is_empty(),
+            "fit_to_data() ohne Bar-Index: jede Zeit bildet dann auf Index 0 ab und \
+             der ganze Chart fällt auf eine Spalte zusammen. Vorher sync_bars() rufen."
+        );
+        let first_bar = self.index.time_to_fractional_index(time_range.start);
+        let last_bar = self.index.time_to_fractional_index(time_range.end);
+        let count = (last_bar - first_bar).max(1.0);
+        let padding = count * 0.05;
+
+        self.set_bars(first_bar - 0.5 - padding, last_bar + 0.5 + padding);
 
         // Respect axis lock: do not change price range when locked
         if !self.price_locked {
@@ -117,60 +250,98 @@ impl Viewport {
         }
     }
 
-    /// Pan by pixel delta
-    pub fn pan(&mut self, delta_x: i32, _delta_y: i32) {
-        let time_per_pixel =
-            (self.time.end - self.time.start) as f64 / self.dimensions.width as f64;
-        let time_delta = (-delta_x as f64 * time_per_pixel) as i64;
+    /// Pan by pixel delta.
+    ///
+    /// Beide Achsen folgen dem Zeigefinger: nach rechts ziehen holt frühere
+    /// Bars ins Bild, nach unten ziehen höhere Preise. `delta_y` wurde bis
+    /// 2026-09-16 verworfen — vertikales Ziehen und die Pfeiltasten hoch/runter
+    /// taten schlicht nichts.
+    pub fn pan(&mut self, delta_x: i32, delta_y: i32) {
+        if delta_x != 0 {
+            let bars_per_pixel = self.bars.span() / self.dimensions.width.max(1) as f64;
+            let shift = -delta_x as f64 * bars_per_pixel;
+            self.bars.first += shift;
+            self.bars.last += shift;
+        }
 
-        self.time.start += time_delta;
-        self.time.end += time_delta;
+        if delta_y != 0 {
+            self.pan_price(delta_y as f64);
+        }
     }
 
-    /// Zoom around a point
-    pub fn zoom(&mut self, factor: f64, center_x: Option<u32>) {
-        let cx = center_x.unwrap_or(self.dimensions.width / 2);
-
-        // Calculate center in time space
-        let center_time = self.x_to_time(cx as f64);
-
-        // Calculate new range
-        let current_range = self.time.end - self.time.start;
-        let new_range = (current_range as f64 * factor) as i64;
-
-        // Clamp zoom levels
-        let min_bars = 10;
-        let max_bars = 5000;
-        let bar_duration = self.timeframe.duration_secs();
-
-        let bars_in_view = new_range / bar_duration;
-        if bars_in_view < min_bars || bars_in_view > max_bars {
+    /// Verschiebt den Preisbereich um `delta_y` Pixel (positiv = nach unten
+    /// ziehen = höhere Preise ins Bild).
+    ///
+    /// Im Log-Modus wird im Logarithmus verschoben, sonst würde derselbe
+    /// Pixelweg unten anders wirken als oben.
+    pub fn pan_price(&mut self, delta_y: f64) {
+        let h = self.dimensions.height as f64;
+        if h <= 0.0 {
             return;
         }
 
-        // Calculate how much time before/after center
-        let time_before = ((center_time - self.time.start) as f64 * factor) as i64;
-        let time_after = ((self.time.end - center_time) as f64 * factor) as i64;
+        if self.log_scale {
+            let log_min = self.price.min.max(1e-10).ln();
+            let log_max = self.price.max.max(1e-10).ln();
+            let shift = (delta_y / h) * (log_max - log_min);
+            self.price.min = (log_min + shift).exp();
+            self.price.max = (log_max + shift).exp();
+        } else {
+            let price_per_pixel = (self.price.max - self.price.min) / h;
+            let shift = delta_y * price_per_pixel;
+            self.price.min += shift;
+            self.price.max += shift;
+        }
+    }
 
-        self.time.start = center_time - time_before;
-        self.time.end = center_time + time_after;
+    /// Zoom around a point.
+    ///
+    /// Die Klemmung zählt jetzt **echte Bars**. Vorher rechnete sie
+    /// `Zeitspanne / timeframe.duration_secs()` und zählte damit über einer
+    /// Pause Bars mit, die es nicht gibt — der Zoom blockierte an der falschen
+    /// Stelle.
+    pub fn zoom(&mut self, factor: f64, center_x: Option<u32>) {
+        let cx = center_x
+            .map(|c| c as f64)
+            .unwrap_or(self.dimensions.width as f64 / 2.0);
+        let center_bar = self.x_to_bar(cx);
+
+        let new_span = self.bars.span() * factor;
+        if !(MIN_VISIBLE_BARS..=MAX_VISIBLE_BARS).contains(&new_span) {
+            return;
+        }
+
+        self.bars = BarRange {
+            first: center_bar - (center_bar - self.bars.first) * factor,
+            last: center_bar + (self.bars.last - center_bar) * factor,
+        };
+    }
+
+    // --- Koordinaten ---
+
+    /// Bildschirm-x eines fraktionalen Bar-Index.
+    pub fn bar_to_x(&self, bar: f64) -> f64 {
+        let span = self.bars.span();
+        if span <= 0.0 {
+            return 0.0;
+        }
+        (bar - self.bars.first) / span * self.dimensions.width as f64
+    }
+
+    /// Fraktionaler Bar-Index an einer Bildschirmposition.
+    pub fn x_to_bar(&self, x: f64) -> f64 {
+        let width = self.dimensions.width.max(1) as f64;
+        self.bars.first + (x / width) * self.bars.span()
     }
 
     /// Convert time to x pixel coordinate
     pub fn time_to_x(&self, time: i64) -> f64 {
-        let t_start = self.time.start as f64;
-        let t_end = self.time.end as f64;
-        let t = time as f64;
-
-        (t - t_start) / (t_end - t_start) * self.dimensions.width as f64
+        self.bar_to_x(self.index.time_to_fractional_index(time))
     }
 
     /// Convert x pixel to time
     pub fn x_to_time(&self, x: f64) -> i64 {
-        let t_start = self.time.start as f64;
-        let t_end = self.time.end as f64;
-
-        (t_start + (x / self.dimensions.width as f64) * (t_end - t_start)) as i64
+        self.index.fractional_index_to_time(self.x_to_bar(x))
     }
 
     /// Convert price to y pixel coordinate
@@ -210,32 +381,29 @@ impl Viewport {
             .collect()
     }
 
-    /// Get bar slot width in CSS pixels
+    /// Get bar slot width in CSS pixels — exakt, nicht geschätzt.
     pub fn bar_width(&self) -> f64 {
-        let time_range = (self.time.end - self.time.start) as f64;
-        let bar_duration = self.timeframe.duration_secs() as f64;
-        let bars_visible = time_range / bar_duration;
-
-        let base = self.dimensions.width as f64 / bars_visible;
+        let span = self.bars.span();
+        if span <= 0.0 {
+            return 1.0;
+        }
+        let base = self.dimensions.width as f64 / span;
         (base + self.bar_spacing_extra).clamp(1.0, 200.0)
     }
 
-    /// Get number of visible bars
+    /// Get number of visible bars — exakt, nicht über die Zeitspanne geschätzt.
     pub fn visible_bars(&self) -> usize {
-        let time_range = (self.time.end - self.time.start) as f64;
-        let bar_duration = self.timeframe.duration_secs() as f64;
-
-        (time_range / bar_duration).ceil() as usize
+        self.bars.span().ceil().max(0.0) as usize
     }
 
     /// Get viewport time start (for optimizations)
     pub fn time_start(&self) -> i64 {
-        self.time.start
+        self.time_range().start
     }
 
     /// Get viewport time end (for optimizations)
     pub fn time_end(&self) -> i64 {
-        self.time.end
+        self.time_range().end
     }
 
     /// Get viewport width (for optimizations)
@@ -311,16 +479,10 @@ impl Viewport {
         x
     }
 
-    /// Apply time scaling based on X movement
-    /// start_x: Initial X position from start_time_scale()
-    /// current_x: Current X position
-    /// initial_time_range: Snapshot of time range when scaling started
-    pub fn apply_time_scale(
-        &mut self,
-        start_x: f64,
-        current_x: f64,
-        initial_time_range: &TimeRange,
-    ) {
+    /// Apply time scaling based on X movement.
+    ///
+    /// `initial_bars`: Schnappschuss des Ausschnitts, als das Ziehen begann.
+    pub fn apply_time_scale(&mut self, start_x: f64, current_x: f64, initial_bars: &BarRange) {
         // Clamp to valid range
         let current_x = current_x.max(0.0);
         let start_x = start_x.max(0.0);
@@ -335,14 +497,10 @@ impl Viewport {
         // Limit scale coefficient to minimum 0.1 (10x minimum zoom)
         let scale_coeff = scale_coeff.max(0.1);
 
-        // Calculate new range from initial snapshot
-        let center = (initial_time_range.start + initial_time_range.end) / 2;
-        let initial_range = (initial_time_range.end - initial_time_range.start) as f64;
-        let new_range = (initial_range * scale_coeff) as i64;
+        let center = (initial_bars.first + initial_bars.last) / 2.0;
+        let new_span = initial_bars.span() * scale_coeff;
 
-        // Apply new range
-        self.time.start = center - new_range / 2;
-        self.time.end = center + new_range / 2;
+        self.set_bars(center - new_span / 2.0, center + new_span / 2.0);
     }
 }
 
@@ -350,58 +508,220 @@ impl Viewport {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_coordinate_transform() {
+    const H1: i64 = 3600;
+
+    fn candles_at(times: &[i64]) -> Vec<Candle> {
+        times
+            .iter()
+            .map(|&t| Candle::new(t, 100.0, 105.0, 95.0, 102.0, 10.0))
+            .collect()
+    }
+
+    /// Zehn Stundenbars, 49 Stunden Pause, fünf weitere Bars.
+    fn weekend_viewport() -> Viewport {
+        let mut times: Vec<i64> = (0..10).map(|i| i * H1).collect();
+        let close = times[9];
+        times.extend((1..=5).map(|i| close + 49 * H1 + i * H1));
+
         let mut vp = Viewport::new(800, 600);
-        vp.time = TimeRange {
-            start: 1000,
-            end: 2000,
-        };
+        vp.set_timeframe(Timeframe::H1);
+        vp.sync_bars(&candles_at(&times));
+        vp.fit_to_data(
+            TimeRange {
+                start: times[0],
+                end: *times.last().unwrap(),
+            },
+            PriceRange {
+                min: 90.0,
+                max: 110.0,
+            },
+        );
+        vp
+    }
+
+    fn regular_viewport(n: usize) -> Viewport {
+        let times: Vec<i64> = (0..n as i64).map(|i| i * H1).collect();
+        let mut vp = Viewport::new(800, 600);
+        vp.set_timeframe(Timeframe::H1);
+        vp.sync_bars(&candles_at(&times));
+        vp.fit_to_data(
+            TimeRange {
+                start: times[0],
+                end: *times.last().unwrap(),
+            },
+            PriceRange {
+                min: 90.0,
+                max: 110.0,
+            },
+        );
+        vp
+    }
+
+    #[test]
+    fn bars_map_to_pixels_and_back() {
+        let vp = regular_viewport(100);
+        for bar in [0.0, 12.5, 99.0] {
+            let x = vp.bar_to_x(bar);
+            assert!(
+                (vp.x_to_bar(x) - bar).abs() < 1e-9,
+                "Rundgang für Bar {bar} über x = {x}"
+            );
+        }
+    }
+
+    #[test]
+    fn price_maps_to_pixels() {
+        let mut vp = Viewport::new(800, 600);
         vp.price = PriceRange {
             min: 100.0,
             max: 200.0,
         };
-
-        // Time to X
-        assert_eq!(vp.time_to_x(1000), 0.0);
-        assert_eq!(vp.time_to_x(2000), 800.0);
-        assert_eq!(vp.time_to_x(1500), 400.0);
-
-        // Price to Y (inverted)
         assert_eq!(vp.price_to_y(200.0), 0.0);
         assert_eq!(vp.price_to_y(100.0), 600.0);
         assert_eq!(vp.price_to_y(150.0), 300.0);
     }
 
+    /// Der Befund aus `plan/07-bar-index-achse.md`: auf der Zeitachse bekam eine
+    /// 49-Stunden-Pause 49 Bar-Breiten Platz. Jetzt genau eine.
     #[test]
-    fn test_pan() {
-        let mut vp = Viewport::new(800, 600);
-        vp.time = TimeRange {
-            start: 1000,
-            end: 2000,
-        };
+    fn a_trading_break_takes_exactly_one_bar_of_width() {
+        let vp = weekend_viewport();
 
-        vp.pan(100, 0); // Pan right 100px
+        let friday = vp.time_to_x(9 * H1);
+        let monday = vp.time_to_x(9 * H1 + 50 * H1);
+        let step = vp.time_to_x(H1) - vp.time_to_x(0);
 
-        // Time should shift left (negative delta)
-        assert!(vp.time.start < 1000);
-        assert!(vp.time.end < 2000);
+        assert!(
+            ((monday - friday) - step).abs() < 1e-6,
+            "über die Pause: {} px, zwischen zwei Bars: {step} px",
+            monday - friday
+        );
+    }
+
+    /// Ebenfalls aus dem Befund: `visible_bars()` schätzte über die Zeitspanne
+    /// und zählte über einer Pause Bars mit, die es nicht gibt.
+    #[test]
+    fn visible_bars_counts_bars_that_exist() {
+        let vp = weekend_viewport();
+        let visible = vp.visible_bars();
+        assert!(
+            (15..=18).contains(&visible),
+            "15 Bars plus Ränder, gefunden {visible} — auf der Zeitachse waren es über 60"
+        );
     }
 
     #[test]
-    fn test_zoom() {
-        let mut vp = Viewport::new(800, 600);
-        // 200 1h-bars = 200 * 3600s = 720_000s range
-        vp.time = TimeRange {
-            start: 0,
-            end: 720_000,
-        };
+    fn bar_width_stays_usable_across_a_break() {
+        let vp = weekend_viewport();
+        assert!(
+            vp.bar_width() > 10.0,
+            "15 Bars auf 800 px, gefunden {}",
+            vp.bar_width()
+        );
+    }
 
-        vp.zoom(0.5, Some(400)); // Zoom in 2x at center
+    #[test]
+    fn panning_shifts_the_visible_bars() {
+        let mut vp = regular_viewport(100);
+        let before = vp.bars();
 
-        let new_range = vp.time.end - vp.time.start;
-        // After zoom-in, range should be half (≈ 360_000s = 100 bars, well above 10-bar min)
-        assert_eq!(new_range, 360_000);
+        vp.pan(100, 0);
+
+        assert!(
+            vp.bars().first < before.first,
+            "nach rechts ziehen holt frühere Bars ins Bild"
+        );
+        assert!(
+            (vp.bars().span() - before.span()).abs() < 1e-9,
+            "Verschieben ändert den Zoom nicht"
+        );
+    }
+
+    #[test]
+    fn zoom_halves_the_visible_span() {
+        let mut vp = regular_viewport(200);
+        let before = vp.bars().span();
+
+        vp.zoom(0.5, Some(400));
+
+        assert!((vp.bars().span() - before * 0.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn zoom_keeps_the_bar_under_the_cursor_in_place() {
+        let mut vp = regular_viewport(200);
+        let anchor = 300.0;
+        let bar_before = vp.x_to_bar(anchor);
+
+        vp.zoom(0.5, Some(anchor as u32));
+
+        assert!(
+            (vp.x_to_bar(anchor) - bar_before).abs() < 1e-6,
+            "unter dem Zeiger muss dieselbe Bar bleiben"
+        );
+    }
+
+    #[test]
+    fn zoom_stops_at_the_limits() {
+        let mut vp = regular_viewport(100);
+        for _ in 0..200 {
+            vp.zoom(0.9, None);
+        }
+        assert!(vp.bars().span() >= MIN_VISIBLE_BARS);
+
+        for _ in 0..400 {
+            vp.zoom(1.1, None);
+        }
+        assert!(vp.bars().span() <= MAX_VISIBLE_BARS);
+    }
+
+    #[test]
+    fn the_time_range_follows_the_bars() {
+        let vp = regular_viewport(100);
+        let range = vp.time_range();
+        assert!(range.start < 0, "links vom ersten Bar liegt Rand");
+        assert!(range.end > 99 * H1, "rechts vom letzten Bar liegt Rand");
+    }
+
+    #[test]
+    fn a_time_range_can_be_set_and_read_back() {
+        let mut vp = regular_viewport(100);
+        vp.set_time_range(TimeRange {
+            start: 10 * H1,
+            end: 60 * H1,
+        });
+
+        let back = vp.time_range();
+        assert_eq!(back.start, 10 * H1);
+        assert_eq!(back.end, 60 * H1);
+    }
+
+    #[test]
+    fn the_right_offset_leaves_room_after_the_last_bar() {
+        let mut vp = regular_viewport(100);
+        let span_before = vp.bars().span();
+
+        vp.set_right_offset(20.0);
+
+        assert!((vp.right_offset() - 20.0).abs() < 1e-9);
+        assert!(
+            (vp.bars().span() - span_before).abs() < 1e-9,
+            "der Leerraum ändert den Zoom nicht"
+        );
+        // Der letzte Bar steht jetzt links vom rechten Rand.
+        let last_x = vp.time_to_x(99 * H1);
+        assert!(last_x < vp.dimensions.width as f64);
+    }
+
+    #[test]
+    fn vertical_panning_moves_the_price_window() {
+        let mut vp = regular_viewport(100);
+        let before = vp.price;
+
+        vp.pan(0, 60);
+
+        assert!(vp.price.min > before.min);
+        assert!((vp.price.max - vp.price.min - (before.max - before.min)).abs() < 1e-9);
     }
 }
 
@@ -414,6 +734,9 @@ mod unit_consistency_tests {
     /// dieselbe Zeiteinheit (Unix-Sekunden) benutzen. Vorher lieferte der Generator
     /// Millisekunden — `visible_bars` war dadurch um Faktor 1000 zu hoch,
     /// `bar_width` auf 1 px geklemmt und `zoom` wirkungslos.
+    ///
+    /// Seit M8 zählt `visible_bars()` echte Bars; der Einheitenfehler zeigte sich
+    /// dann in `time_to_fractional_index`, das über die Bar-Dauer extrapoliert.
     #[test]
     fn generator_and_viewport_share_the_time_unit() {
         let tf = Timeframe::M5;
@@ -429,7 +752,8 @@ mod unit_consistency_tests {
         );
 
         let mut viewport = Viewport::new(800, 400);
-        viewport.timeframe = tf;
+        viewport.set_timeframe(tf);
+        viewport.sync_bars(&candles);
         viewport.fit_to_data(
             TimeRange {
                 start: candles[0].time,
@@ -441,7 +765,6 @@ mod unit_consistency_tests {
             },
         );
 
-        // Ohne Einheitenfehler liegt die Schätzung in der Größenordnung der Kerzenzahl.
         let visible = viewport.visible_bars();
         assert!(
             (50..=200).contains(&visible),
@@ -451,16 +774,27 @@ mod unit_consistency_tests {
             viewport.bar_width() > 1.0,
             "bar_width() darf nicht auf das Minimum geklemmt sein"
         );
+
+        // Die Extrapolation jenseits der Daten arbeitet in Sekunden.
+        let last_time = candles.last().unwrap().time;
+        let one_bar_later = viewport.bar_index().fractional_index_to_time(100.0);
+        assert_eq!(one_bar_later, last_time + tf.duration_secs());
     }
 
     #[test]
-    fn zoom_actually_changes_the_time_range() {
+    fn zoom_actually_changes_the_visible_span() {
+        let tf = Timeframe::M5;
+        let candles =
+            CandleGenerator::new(GeneratorConfig::crypto().with_seed(1).with_timeframe(tf))
+                .generate(100);
+
         let mut viewport = Viewport::new(800, 400);
-        viewport.timeframe = Timeframe::M5;
+        viewport.set_timeframe(tf);
+        viewport.sync_bars(&candles);
         viewport.fit_to_data(
             TimeRange {
-                start: 1_600_000_000,
-                end: 1_600_030_000,
+                start: candles[0].time,
+                end: candles.last().unwrap().time,
             },
             PriceRange {
                 min: 90.0,
@@ -468,13 +802,13 @@ mod unit_consistency_tests {
             },
         );
 
-        let before = viewport.time_end() - viewport.time_start();
+        let before = viewport.bars().span();
         viewport.zoom(0.5, None);
-        let after = viewport.time_end() - viewport.time_start();
+        let after = viewport.bars().span();
 
         assert!(
             after < before,
-            "zoom(0.5) muss das Zeitfenster verkleinern (vorher {before}, nachher {after})"
+            "zoom(0.5) muss den Ausschnitt verkleinern (vorher {before}, nachher {after})"
         );
     }
 }

@@ -22,7 +22,7 @@ fn main() {
     state.zoom(0.5, None);
 
     println!("vorher:");
-    println!("  Kerzen:   {}", state.candles.len());
+    println!("  Kerzen:   {}", state.candles().len());
     println!(
         "  Zeitfenster: {} .. {}",
         state.viewport.time_start(),
@@ -38,14 +38,14 @@ fn main() {
 
     println!();
     println!("nachher:");
-    println!("  Kerzen:   {}", restored.candles.len());
+    println!("  Kerzen:   {}", restored.candles().len());
     println!(
         "  Zeitfenster: {} .. {}",
         restored.viewport.time_start(),
         restored.viewport.time_end()
     );
 
-    assert_eq!(state.candles.len(), restored.candles.len());
+    assert_eq!(state.candles().len(), restored.candles().len());
     assert_eq!(
         state.viewport.time_start(),
         restored.viewport.time_start(),

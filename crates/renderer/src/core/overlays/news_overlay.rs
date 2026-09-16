@@ -57,10 +57,11 @@ impl ChartOverlay for NewsOverlay {
     fn render_commands(&self, viewport: &Viewport) -> Vec<RenderCommand> {
         let mut commands = Vec::new();
         let height = viewport.dimensions.height as f64;
+        let visible_time = viewport.time_range();
 
         for event in &self.events {
             // Only render events within the visible time range
-            if event.time < viewport.time.start || event.time > viewport.time.end {
+            if event.time < visible_time.start || event.time > visible_time.end {
                 continue;
             }
 

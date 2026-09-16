@@ -8,6 +8,7 @@
 use std::collections::HashMap;
 
 use crate::core::indicators::{IndicatorPlacement, IndicatorSeries};
+use crate::core::scrollbar::{ScrollbarGeometry, SCROLLBAR_HEIGHT};
 use crate::core::{Candle, ChartState, FootprintCandle};
 use crate::primitives::Color;
 use crate::rendering::Renderer;
@@ -83,6 +84,79 @@ pub struct RenderExtras<'a> {
 /// Die Abbildung Artefakt → Szenenobjekt liegt in `kestrel-chartkit`; hier wird nur
 /// eingesammelt. `fallback_span` fängt Artefakte auf, die keine eigene Zeitspanne
 /// tragen — seit Chartkit 0.2.0 die Ausnahme.
+/// Platz, den eine Achsenbeschriftung mindestens braucht. Bestimmt, welche
+/// Tick-Stufe die Achse wählt.
+const AXIS_LABEL_WIDTH_PX: f64 = 64.0;
+/// Breite der Preisachsenspalte rechts.
+pub const PRICE_AXIS_WIDTH_PX: f64 = 64.0;
+/// Höhe der Zeitachse unten.
+pub const TIME_AXIS_HEIGHT_PX: f64 = 20.0;
+
+/// Lage der Zeitleiste: über der Zeitachse, über die Inhaltsbreite.
+pub fn scrollbar_geometry(width: f64, height: f64) -> ScrollbarGeometry {
+    ScrollbarGeometry {
+        x: 0.0,
+        y: height - TIME_AXIS_HEIGHT_PX - SCROLLBAR_HEIGHT,
+        width: (width - PRICE_AXIS_WIDTH_PX).max(0.0),
+        height: SCROLLBAR_HEIGHT,
+    }
+}
+
+/// Zeichnet die Zeitleiste.
+///
+/// Zurückhaltend, solange der Zeiger woanders ist, und deutlich, sobald er sie
+/// berührt — statt eines Timers, den der Kern ohne hereingereichte Zeit gar
+/// nicht führen könnte.
+fn render_scrollbar(state: &ChartState, renderer: &mut dyn Renderer) {
+    let vp = &state.viewport;
+    let width = vp.dimensions.width as f64;
+    let height = vp.dimensions.height as f64;
+    let geometry = scrollbar_geometry(width, height);
+    if geometry.width <= 0.0 || vp.bar_count() == 0 {
+        return;
+    }
+
+    let thumb = geometry.thumb(vp.bars(), vp.bar_count());
+    let hovered = state.crosshair.visible
+        && geometry
+            .hit(
+                vp.bars(),
+                vp.bar_count(),
+                state.crosshair.x,
+                state.crosshair.y,
+            )
+            .is_some();
+    let active = hovered || state.is_scrolling();
+
+    let track = state
+        .options
+        .grid_color
+        .with_alpha(if active { 0.55 } else { 0.28 });
+    let handle = state
+        .options
+        .text_color
+        .with_alpha(if active { 0.72 } else { 0.34 });
+
+    // Bahn als dünner Strich in der Mitte, Griff als volle Höhe: der Griff
+    // bleibt dadurch auch bei geringem Kontrast als Objekt erkennbar.
+    let mid = geometry.y + geometry.height / 2.0;
+    renderer.draw_line(
+        geometry.x,
+        mid,
+        geometry.x + geometry.width,
+        mid,
+        track,
+        1.0,
+    );
+    renderer.fill_rect(
+        thumb.x,
+        geometry.y + 2.0,
+        thumb.width,
+        geometry.height - 4.0,
+        handle,
+    );
+}
+
 pub fn scene_from_indicator_panes(
     panes: &[IndicatorPane],
     fallback_span: Option<(i64, i64)>,
@@ -152,13 +226,18 @@ pub fn render_chart(state: &mut ChartState, extras: &RenderExtras, renderer: &mu
             renderer.draw_line(0.0, y, vp.dimensions.width as f64, y, grid_color, 1.0);
         }
 
-        // Draw vertical grid lines (time levels)
-        let bar_width = vp.bar_width();
-        let step = (vp.dimensions.width as f64 / 10.0).max(bar_width * 5.0);
-        let mut x = 0.0;
-        while x < vp.dimensions.width as f64 {
+        // Vertikale Gitterlinien stehen an denselben Kalendersprüngen wie die
+        // Achsenbeschriftung — nicht in gleichen Pixelabständen. Sonst liefe das
+        // Gitter neben den Beschriftungen her.
+        for tick in crate::core::time_axis::axis_ticks(
+            vp.bar_index(),
+            vp.bars(),
+            vp.dimensions.width as f64,
+            vp.timezone_offset_minutes,
+            AXIS_LABEL_WIDTH_PX,
+        ) {
+            let x = vp.time_to_x(tick.time);
             renderer.draw_line(x, 0.0, x, vp.dimensions.height as f64, grid_color, 1.0);
-            x += step;
         }
     }
 
@@ -191,10 +270,10 @@ pub fn render_chart(state: &mut ChartState, extras: &RenderExtras, renderer: &mu
         let owned_visible: Vec<Candle>;
         let render_candles: &[Candle] =
             if let crate::primitives::CandleStyle::Renko { brick_size } = candle_style {
-                renko_bricks = crate::core::renko::compute_renko(&state.candles, brick_size);
+                renko_bricks = crate::core::renko::compute_renko(state.candles(), brick_size);
                 &renko_bricks
             } else if candle_style == crate::primitives::CandleStyle::HeikinAshi {
-                heikin_ashi = crate::core::heikin_ashi::compute_heikin_ashi(&state.candles);
+                heikin_ashi = crate::core::heikin_ashi::compute_heikin_ashi(state.candles());
                 &heikin_ashi
             } else {
                 owned_visible = visible_candles.iter().map(|c| (*c).clone()).collect();
@@ -226,8 +305,9 @@ pub fn render_chart(state: &mut ChartState, extras: &RenderExtras, renderer: &mu
             }
             crate::primitives::CandleStyle::Renko { brick_size: _ } => {
                 // Renko bricks rendered as filled rectangles
+                let visible_time = vp.time_range();
                 for candle in render_candles {
-                    if candle.time < vp.time.start || candle.time > vp.time.end {
+                    if candle.time < visible_time.start || candle.time > visible_time.end {
                         continue;
                     }
                     let x = vp.time_to_x(candle.time);
@@ -332,8 +412,9 @@ pub fn render_chart(state: &mut ChartState, extras: &RenderExtras, renderer: &mu
         if tf_secs <= 3600 {
             let chart_width = vp.dimensions.width as f64;
             let chart_height = vp.dimensions.height as f64;
-            let time_start = vp.time.start;
-            let time_end = vp.time.end;
+            let visible_time = vp.time_range();
+            let time_start = visible_time.start;
+            let time_end = visible_time.end;
 
             // Iterate over each day in the visible range (±1 day buffer)
             let day_secs: i64 = 86400;
@@ -397,7 +478,7 @@ pub fn render_chart(state: &mut ChartState, extras: &RenderExtras, renderer: &mu
     render_overlay_indicators(indicator_panes, state, renderer);
 
     if draw_indicator_artifacts {
-        let fallback = match (state.candles.first(), state.candles.last()) {
+        let fallback = match (state.candles().first(), state.candles().last()) {
             (Some(first), Some(last)) => Some((first.time, last.time)),
             _ => None,
         };
@@ -452,6 +533,10 @@ pub fn render_chart(state: &mut ChartState, extras: &RenderExtras, renderer: &mu
 
     render_axes(state, indicator_panes, renderer);
 
+    if state.options.show_scrollbar {
+        render_scrollbar(state, renderer);
+    }
+
     renderer.end_frame();
 
     state.clear_dirty();
@@ -469,8 +554,9 @@ fn render_compare_symbols(
 
     let vp = &state.viewport;
     let chart_width = vp.dimensions.width as f64;
-    let time_start = vp.time.start;
-    let time_end = vp.time.end;
+    let visible_time = vp.time_range();
+    let time_start = visible_time.start;
+    let time_end = visible_time.end;
 
     let mut series = Vec::new();
     let mut percent_min = 0.0_f64;
@@ -603,6 +689,7 @@ fn render_overlay_indicators(
     renderer: &mut dyn Renderer,
 ) {
     let vp = &state.viewport;
+    let visible_time = vp.time_range();
     for pane in indicator_panes
         .iter()
         .filter(|pane| pane.placement() == IndicatorPlacement::Overlay)
@@ -611,7 +698,7 @@ fn render_overlay_indicators(
             let points: Vec<(f64, f64)> = line
                 .points
                 .iter()
-                .filter(|(time, _)| *time >= vp.time.start && *time <= vp.time.end)
+                .filter(|(time, _)| *time >= visible_time.start && *time <= visible_time.end)
                 .map(|(time, value)| (vp.time_to_x(*time), vp.price_to_y(*value)))
                 .collect();
             if points.len() >= 2 {
@@ -632,9 +719,10 @@ fn render_footprint_candles(
     }
 
     let vp = &state.viewport;
+    let visible_time = vp.time_range();
     let visible: Vec<&FootprintCandle> = footprint_candles
         .iter()
-        .filter(|candle| candle.time >= vp.time.start && candle.time <= vp.time.end)
+        .filter(|candle| candle.time >= visible_time.start && candle.time <= visible_time.end)
         .collect();
     if visible.is_empty() {
         return;
@@ -760,7 +848,7 @@ fn render_indicator_panes(
     state: &ChartState,
     renderer: &mut dyn Renderer,
 ) {
-    if indicator_panes.is_empty() || state.candles.len() < 3 {
+    if indicator_panes.is_empty() || state.candles().len() < 3 {
         return;
     }
 
@@ -802,6 +890,7 @@ fn render_indicator_panes(
         renderer.draw_line(content_w, top, content_w, top + pane_h, border, 1.0);
 
         // Alle Linien des Indikators, auf eine gemeinsame Skala gebracht.
+        let visible_time = vp.time_range();
         let lines: Vec<Vec<(i64, f64)>> = pane
             .series
             .lines()
@@ -810,7 +899,9 @@ fn render_indicator_panes(
                     .iter()
                     .copied()
                     .filter(|(time, value)| {
-                        *time >= vp.time.start && *time <= vp.time.end && value.is_finite()
+                        *time >= visible_time.start
+                            && *time <= visible_time.end
+                            && value.is_finite()
                     })
                     .collect()
             })
@@ -893,8 +984,8 @@ fn render_axes(state: &ChartState, indicator_panes: &[IndicatorPane], renderer: 
     let bg = state.options.background_color.with_alpha(0.82);
     let grid = state.options.grid_color.with_alpha(0.85);
 
-    let price_axis_w = 64.0;
-    let time_axis_h = 20.0;
+    let price_axis_w = PRICE_AXIS_WIDTH_PX;
+    let time_axis_h = TIME_AXIS_HEIGHT_PX;
     renderer.fill_rect(width - price_axis_w, 0.0, price_axis_w, main_height, bg);
     renderer.fill_rect(0.0, height - time_axis_h, width, time_axis_h, bg);
     renderer.draw_line(
@@ -933,16 +1024,22 @@ fn render_axes(state: &ChartState, indicator_panes: &[IndicatorPane], renderer: 
         );
     }
 
-    let time_lines = 5;
-    let time_span = (vp.time.end - vp.time.start).max(1);
-    for i in 0..=time_lines {
-        let time = vp.time.start + time_span * i as i64 / time_lines as i64;
-        let x = vp.time_to_x(time);
+    // Ticks stehen an Bars mit Kalendersprung. In gleichen Zeitabständen ginge
+    // es auf der Bar-Achse nicht mehr: zwischen zwei benachbarten Bars können
+    // fünf Minuten oder ein Wochenende liegen.
+    for tick in crate::core::time_axis::axis_ticks(
+        vp.bar_index(),
+        vp.bars(),
+        width - price_axis_w,
+        vp.timezone_offset_minutes,
+        AXIS_LABEL_WIDTH_PX,
+    ) {
+        let x = vp.time_to_x(tick.time);
         if x < 0.0 || x > width - price_axis_w {
             continue;
         }
         renderer.draw_text(
-            &format_axis_time(time),
+            &tick.label,
             x,
             height - 4.0,
             axis_color,
@@ -951,10 +1048,4 @@ fn render_axes(state: &ChartState, indicator_panes: &[IndicatorPane], renderer: 
             crate::rendering::TextBaseline::Bottom,
         );
     }
-}
-
-fn format_axis_time(time: i64) -> String {
-    chrono::DateTime::from_timestamp(time, 0)
-        .map(|dt| dt.format("%m-%d %H:%M").to_string())
-        .unwrap_or_else(|| time.to_string())
 }

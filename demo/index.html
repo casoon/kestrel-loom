@@ -82,7 +82,10 @@
             v: 100 + rnd() * 900,
           });
           price = c;
-          time += 300; // M5
+          // Alle 200 Bars eine Handelspause von 49 Stunden — so lässt sich
+          // nachsehen, dass die Achse nach Bar-Index positioniert und die Pause
+          // keine Lücke im Bild hinterlässt.
+          time += i > 0 && i % 200 === 0 ? 49 * 3600 : 300; // M5
         }
         return out;
       }
@@ -95,7 +98,7 @@
         chart.view.fit();
 
         document.getElementById('count').textContent = `${data.length} Kerzen`;
-        status.textContent = 'ok — Zoom mit dem Mausrad, Pan mit gedrückter Maustaste.';
+        status.textContent = 'ok — Mausrad und Pinch zoomen, Wischen und Ziehen verschieben, Doppelklick setzt zurück.';
 
         const indicatorSelect = document.getElementById('indicator');
         const all = chart.indicators.available();

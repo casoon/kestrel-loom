@@ -80,6 +80,104 @@ fn resizing_requires_a_redraw() {
     );
 }
 
+/// Zeitfenster aus `getViewportInfo` — die Fassade liefert JSON als String.
+fn time_span(chart: &WasmChart) -> i64 {
+    let json = chart
+        .get_viewport_info()
+        .as_string()
+        .expect("getViewportInfo liefert einen String");
+    let value: serde_json::Value = serde_json::from_str(&json).expect("gültiges JSON");
+    value["time"]["end"].as_i64().unwrap() - value["time"]["start"].as_i64().unwrap()
+}
+
+/// Der Befund vom 2026-09-16: jedes Rad-Ereignis zoomte um feste 10 %, also
+/// zoomte ein Wischer der Magic Mouse dutzendfach. Ein Wischer darf den Zoom
+/// gar nicht anfassen.
+#[wasm_bindgen_test]
+fn a_trackpad_swipe_does_not_zoom() {
+    let mut chart = chart_with_data(200);
+    let before = time_span(&chart);
+
+    for step in 0..25 {
+        chart.on_wheel(400.0, 200.0, 6.0, 0.0, false, 0, step as f64 * 16.0);
+    }
+
+    assert_eq!(
+        before,
+        time_span(&chart),
+        "ein horizontaler Wischer verschiebt, er zoomt nicht"
+    );
+}
+
+#[wasm_bindgen_test]
+fn a_classic_wheel_notch_zooms() {
+    let mut chart = chart_with_data(200);
+    let before = time_span(&chart);
+
+    chart.on_wheel(400.0, 200.0, 0.0, -100.0, false, 0, 0.0);
+
+    assert!(
+        time_span(&chart) < before,
+        "hochscrollen mit dem Rad zoomt hinein"
+    );
+}
+
+#[wasm_bindgen_test]
+fn a_pinch_zooms_despite_a_small_delta() {
+    let mut chart = chart_with_data(200);
+    let before = time_span(&chart);
+
+    chart.on_wheel(400.0, 200.0, 0.0, -4.0, true, 0, 0.0);
+
+    assert!(
+        time_span(&chart) < before,
+        "ctrlKey ist das Pinch-Signal des Browsers"
+    );
+}
+
+/// Kerzen mit einer 49-Stunden-Handelspause in der Mitte.
+fn candles_with_a_weekend(before: usize, after: usize) -> String {
+    let hour = 3600i64;
+    let mut times: Vec<i64> = (0..before as i64)
+        .map(|i| 1_789_084_800 + i * hour)
+        .collect();
+    let close = *times.last().unwrap();
+    times.extend((1..=after as i64).map(|i| close + 49 * hour + i * hour));
+
+    let mut out = String::from("[");
+    for (i, time) in times.iter().enumerate() {
+        out.push_str(&format!(
+            "{}{{\"time\":{},\"o\":100,\"h\":101,\"l\":99,\"c\":100.5,\"v\":100}}",
+            if i == 0 { "" } else { "," },
+            time
+        ));
+    }
+    out.push(']');
+    out
+}
+
+/// Der Befund aus `plan/07-bar-index-achse.md`: auf der Zeitachse bekam eine
+/// 49-Stunden-Pause 49 Bar-Breiten Platz, im Chart klaffte eine Lücke.
+#[wasm_bindgen_test]
+fn a_trading_break_does_not_open_a_gap() {
+    let mut chart = WasmChart::new(800, 400, "1h").expect("Chart baubar");
+    chart
+        .set_candles(&candles_with_a_weekend(10, 10))
+        .expect("Kerzen annehmbar");
+
+    let hour = 3600i64;
+    let friday_close = 1_789_084_800 + 9 * hour;
+
+    let across_the_break =
+        chart.time_to_x(friday_close + 50 * hour) - chart.time_to_x(friday_close);
+    let between_two_bars = chart.time_to_x(hour) - chart.time_to_x(0);
+
+    assert!(
+        (across_the_break - between_two_bars).abs() < 0.001,
+        "über die Pause {across_the_break} px, zwischen zwei Bars {between_two_bars} px"
+    );
+}
+
 #[wasm_bindgen_test]
 fn known_candle_styles_are_accepted_and_unknown_ones_refused() {
     let mut chart = chart_with_data(20);

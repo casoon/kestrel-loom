@@ -93,7 +93,16 @@ export async function createChart(canvas, options = {}) {
       'wheel',
       (e) => {
         e.preventDefault();
-        chart.onMouseWheel(...local(e), e.deltaY);
+        // Vollständig durchreichen: erst aus deltaX, ctrlKey, deltaMode und
+        // Zeitstempel zusammen lässt sich Trackpad von Mausrad unterscheiden.
+        chart.onWheel(
+          ...local(e),
+          e.deltaX,
+          e.deltaY,
+          e.ctrlKey,
+          e.deltaMode,
+          e.timeStamp,
+        );
       },
       { passive: false },
     );
@@ -170,6 +179,19 @@ export async function createChart(canvas, options = {}) {
       showSessions: (on) => chart.setShowSessions(on),
       resetPriceScale: () => chart.resetPriceScale(),
       resetTimeScale: () => chart.resetTimeScale(),
+      /** Leerraum rechts vom letzten Bar, in Bars — Platz für Werkzeuge in die Zukunft. */
+      rightOffset: (bars) =>
+        bars === undefined ? chart.getRightOffset() : chart.setRightOffset(bars),
+      /**
+       * Zeitleiste am unteren Rand: Griff ziehen verschiebt, Griffränder zoomen,
+       * ein Klick daneben blättert um eine Bildbreite.
+       */
+      scrollbar: (on) =>
+        on === undefined ? chart.getShowScrollbar() : chart.setShowScrollbar(on),
+      /** Bildschirm-x eines Zeitstempels — für eigene Marker über dem Chart. */
+      timeToX: (time) => chart.timeToX(t(time)),
+      /** Zeitstempel an einer Bildschirmposition. */
+      xToTime: (x) => chart.xToTime(x),
     },
 
     style: {

@@ -114,7 +114,8 @@ fn scene() -> (Viewport, ToolManager) {
     let candles = generator.generate(200);
 
     let mut viewport = Viewport::new(800, 400);
-    viewport.timeframe = Timeframe::M5;
+    viewport.set_timeframe(Timeframe::M5);
+    viewport.sync_bars(&candles);
     let min = candles.iter().map(|c| c.l).fold(f64::MAX, f64::min);
     let max = candles.iter().map(|c| c.h).fold(f64::MIN, f64::max);
     viewport.fit_to_data(
@@ -190,7 +191,8 @@ fn culling_keeps_only_visible_candles() {
     let candles = generator.generate(500);
 
     let mut viewport = Viewport::new(800, 400);
-    viewport.timeframe = Timeframe::M5;
+    viewport.set_timeframe(Timeframe::M5);
+    viewport.sync_bars(&candles);
     viewport.fit_to_data(
         TimeRange {
             start: candles[0].time,
@@ -308,7 +310,7 @@ fn a_frame_with_an_indicator_pane_is_stable() {
 
     let mut panes = vec![IndicatorPane::new("pane-rsi", "rsi", HashMap::new(), 0.28)
         .expect("rsi ist im Chartkit-Katalog")];
-    update_indicator_panes(&mut panes, &state.candles);
+    update_indicator_panes(&mut panes, state.candles());
 
     assert!(
         !panes[0].series.values().is_empty(),
@@ -354,7 +356,7 @@ fn bollinger_renders_as_an_overlay_with_its_bands() {
 
     let mut panes =
         vec![IndicatorPane::new("pane-bollinger", "bollinger", HashMap::new(), 0.28).unwrap()];
-    update_indicator_panes(&mut panes, &state.candles);
+    update_indicator_panes(&mut panes, state.candles());
 
     assert_eq!(panes[0].placement(), IndicatorPlacement::Overlay);
     assert_eq!(
@@ -415,7 +417,7 @@ fn an_overlay_does_not_shrink_the_main_chart() {
             Some(name) => vec![IndicatorPane::new("p", name, HashMap::new(), 0.28).unwrap()],
             None => Vec::new(),
         };
-        update_indicator_panes(&mut panes, &state.candles);
+        update_indicator_panes(&mut panes, state.candles());
         let extras = RenderExtras {
             indicator_panes: &panes,
             ..Default::default()
@@ -516,7 +518,7 @@ fn indicator_artifacts_are_drawn_when_asked_for() {
         vec![
             IndicatorPane::new("pane-vp", "extended_volume_profile", HashMap::new(), 0.28).unwrap(),
         ];
-    update_indicator_panes(&mut panes, &state.candles);
+    update_indicator_panes(&mut panes, state.candles());
 
     assert!(
         !panes[0].series.artifacts().is_empty(),
@@ -524,8 +526,8 @@ fn indicator_artifacts_are_drawn_when_asked_for() {
     );
 
     let span = (
-        state.candles[0].time,
-        state.candles[state.candles.len() - 1].time,
+        state.candles()[0].time,
+        state.candles()[state.candles().len() - 1].time,
     );
     let scene =
         scene_from_indicator_panes(&panes, Some(span)).expect("Artefakte ergeben eine Szene");

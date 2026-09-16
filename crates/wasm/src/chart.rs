@@ -6,9 +6,10 @@ use wasm_bindgen::prelude::*;
 
 use web_sys::HtmlCanvasElement;
 
+use kestrel_loom::core::wheel_zoom_factor;
 use kestrel_loom::core::{
     Candle, ChartState, EventHandler, FootprintCandle, KeyboardEvent, MouseButton, MouseEvent,
-    Timeframe, TouchEvent,
+    Timeframe, TouchEvent, WheelInput,
 };
 
 use crate::canvas2d::Canvas2DRenderer;
@@ -122,7 +123,7 @@ impl WasmChart {
             .map_err(|e| JsValue::from_str(&format!("Failed to parse candles: {}", e)))?;
 
         let mut buf = CandleBuffer::new();
-        buf.snapshot(self.state.candles.clone());
+        buf.snapshot(self.state.candles().to_vec());
         buf.append(&incoming);
         self.state.set_candles(buf.candles().to_vec());
         Ok(())
@@ -141,7 +142,7 @@ impl WasmChart {
             .map_err(|e| JsValue::from_str(&format!("Failed to parse candle: {}", e)))?;
 
         let mut buf = CandleBuffer::new();
-        buf.snapshot(self.state.candles.clone());
+        buf.snapshot(self.state.candles().to_vec());
         buf.update_running(candle);
         self.state.set_candles(buf.candles().to_vec());
         Ok(())
@@ -157,7 +158,7 @@ impl WasmChart {
     /// Get all candles as JSON (for indicator calculations)
     #[wasm_bindgen(js_name = getCandles)]
     pub fn get_candles(&self) -> String {
-        serde_json::to_string(&self.state.candles).unwrap_or_else(|_| "[]".to_string())
+        serde_json::to_string(self.state.candles()).unwrap_or_else(|_| "[]".to_string())
     }
 
     /// Add or replace a comparison symbol rendered as normalized percent performance.
@@ -332,12 +333,50 @@ impl WasmChart {
             .handle_mouse_event(event, &mut self.state);
     }
 
-    /// Handle mouse wheel event
-    #[wasm_bindgen(js_name = onMouseWheel)]
-    pub fn on_mouse_wheel(&mut self, x: f64, y: f64, delta_y: f64) {
-        let event = MouseEvent::Wheel { x, y, delta_y };
+    /// Rad-, Trackpad- oder Pinch-Eingabe.
+    ///
+    /// Alle Felder kommen direkt aus dem `WheelEvent` des Browsers. Erst aus
+    /// ihrem Zusammenspiel lässt sich sagen, ob gezoomt oder verschoben werden
+    /// soll — ein Trackpad und ein klassisches Rad senden dasselbe Ereignis.
+    /// `delta_mode`: 0 = Pixel, 1 = Zeilen, 2 = Seiten. `timestamp_ms` ist
+    /// `event.timeStamp` und hält zusammen, was zu einer Wischgeste gehört.
+    #[wasm_bindgen(js_name = onWheel)]
+    #[allow(clippy::too_many_arguments)]
+    pub fn on_wheel(
+        &mut self,
+        x: f64,
+        y: f64,
+        delta_x: f64,
+        delta_y: f64,
+        ctrl_key: bool,
+        delta_mode: u32,
+        timestamp_ms: f64,
+    ) {
+        let event = MouseEvent::Wheel(WheelInput {
+            x,
+            y,
+            delta_x,
+            delta_y,
+            ctrl_key,
+            delta_mode,
+            timestamp_ms,
+        });
         self.event_handler
             .handle_mouse_event(event, &mut self.state);
+    }
+
+    /// Veraltet — nur noch für Einbindungen, die `onWheel` nicht kennen.
+    ///
+    /// Ohne `deltaX`, `ctrlKey` und Zeitstempel bleibt nur, jedes Ereignis als
+    /// klassisches Rad zu behandeln, also zu zoomen. Wer ein Trackpad oder eine
+    /// Magic Mouse bedienbar haben will, ruft `onWheel` auf.
+    #[wasm_bindgen(js_name = onMouseWheel)]
+    pub fn on_mouse_wheel(&mut self, x: f64, _y: f64, delta_y: f64) {
+        // Am Gestendeuter vorbei: ohne Zeitstempel ließe sich keine Geste
+        // zusammenhalten, und ein festgehaltener falscher Zustand wäre
+        // schlimmer als gar keiner.
+        self.state
+            .zoom(wheel_zoom_factor(delta_y), Some(x.max(0.0) as u32));
     }
 
     /// Handle mouse leave event
@@ -518,8 +557,8 @@ impl WasmChart {
 
         let info = serde_json::json!({
             "time": {
-                "start": vp.time.start,
-                "end": vp.time.end,
+                "start": vp.time_range().start,
+                "end": vp.time_range().end,
             },
             "price": {
                 "min": vp.price.min,
@@ -599,7 +638,7 @@ impl WasmChart {
             .ok_or_else(|| JsValue::from_str("No renderer attached"))?;
 
         // Indikatorwerte fortschreiben, bevor gezeichnet wird — der Loop rechnet nicht.
-        update_indicator_panes(&mut self.indicator_panes, &self.state.candles);
+        update_indicator_panes(&mut self.indicator_panes, self.state.candles());
 
         let extras = RenderExtras {
             indicator_panes: &self.indicator_panes,
@@ -1189,7 +1228,7 @@ impl WasmChart {
     #[wasm_bindgen(js_name = resetPriceScale)]
     pub fn reset_price_scale(&mut self) -> Result<(), JsValue> {
         // Re-fit to current candle data
-        if !self.state.candles.is_empty() {
+        if !self.state.candles().is_empty() {
             let visible_candles = self.state.visible_candles();
             if !visible_candles.is_empty() {
                 let mut min_price = f64::MAX;
@@ -1218,13 +1257,13 @@ impl WasmChart {
     pub fn start_time_scale(&mut self, x: f64) -> Result<(), JsValue> {
         use kestrel_loom::core::InteractionState;
 
-        // Capture X and snapshot time range
+        // Capture X and snapshot the visible bar range
         let start_x = self.state.viewport.start_time_scale(x);
-        let initial_time_range = self.state.viewport.time;
+        let initial_bars = self.state.viewport.bars();
 
         self.state.interaction = InteractionState::ScalingTime {
             start_x,
-            initial_time_range,
+            initial_bars,
         };
 
         Ok(())
@@ -1238,12 +1277,12 @@ impl WasmChart {
         // Only apply if we're in scaling mode
         if let InteractionState::ScalingTime {
             start_x,
-            ref initial_time_range,
+            ref initial_bars,
         } = self.state.interaction
         {
             self.state
                 .viewport
-                .apply_time_scale(start_x, x, initial_time_range);
+                .apply_time_scale(start_x, x, initial_bars);
             self.state.mark_dirty();
         }
 
@@ -1259,20 +1298,45 @@ impl WasmChart {
         Ok(())
     }
 
+    /// Bildschirm-x eines Zeitstempels — nach Bar-Index positioniert.
+    ///
+    /// Für Einbindungen, die eigene Marker über den Chart legen: sie müssen
+    /// dieselbe Achse benutzen, und die lässt sich von außen nicht nachrechnen.
+    #[wasm_bindgen(js_name = timeToX)]
+    pub fn time_to_x(&self, time: i64) -> f64 {
+        self.state.viewport.time_to_x(time)
+    }
+
+    /// Zeitstempel an einer Bildschirmposition.
+    #[wasm_bindgen(js_name = xToTime)]
+    pub fn x_to_time(&self, x: f64) -> i64 {
+        self.state.viewport.x_to_time(x)
+    }
+
+    /// Leerraum rechts vom letzten Bar, in Bars.
+    #[wasm_bindgen(js_name = getRightOffset)]
+    pub fn get_right_offset(&self) -> f64 {
+        self.state.viewport.right_offset()
+    }
+
+    /// Setzt den Leerraum rechts vom letzten Bar, ohne den Zoom zu ändern.
+    #[wasm_bindgen(js_name = setRightOffset)]
+    pub fn set_right_offset(&mut self, bars: f64) {
+        self.state.viewport.set_right_offset(bars);
+        self.state.mark_dirty();
+    }
+
     /// Reset time scale to fit all data (double-click)
     #[wasm_bindgen(js_name = resetTimeScale)]
     pub fn reset_time_scale(&mut self) -> Result<(), JsValue> {
-        // Re-fit to all candle data
-        if !self.state.candles.is_empty() {
-            let first_time = self.state.candles[0].time;
-            let last_time = self.state.candles[self.state.candles.len() - 1].time;
-
-            // Add 5% padding
-            let range = (last_time - first_time) as f64;
-            let padding = (range * 0.05) as i64;
-
-            self.state.viewport.time.start = first_time - padding;
-            self.state.viewport.time.end = last_time + padding;
+        // Re-fit to all candle data — in Bars, nicht in Zeit: über eine
+        // Handelspause hinweg zählt eine Zeitspanne Bars mit, die es nicht gibt.
+        if !self.state.candles().is_empty() {
+            let count = self.state.candles().len() as f64;
+            let padding = count * 0.05;
+            self.state
+                .viewport
+                .set_bars(-0.5 - padding, count - 0.5 + padding);
             self.state.mark_dirty();
         }
 
@@ -1351,7 +1415,7 @@ impl WasmChart {
             MagnetMode::Weak | MagnetMode::Strong => self.state.tool_manager.snap_to_candle(
                 time,
                 price,
-                &self.state.candles,
+                self.state.candles(),
                 threshold_px,
                 &self.state.viewport,
             ),
@@ -1395,6 +1459,18 @@ impl WasmChart {
     pub fn set_show_sessions(&mut self, show: bool) {
         self.state.options.show_sessions = show;
         self.state.mark_dirty();
+    }
+
+    /// Zeitleiste am unteren Rand ein- oder ausblenden.
+    #[wasm_bindgen(js_name = setShowScrollbar)]
+    pub fn set_show_scrollbar(&mut self, show: bool) {
+        self.state.options.show_scrollbar = show;
+        self.state.mark_dirty();
+    }
+
+    #[wasm_bindgen(js_name = getShowScrollbar)]
+    pub fn get_show_scrollbar(&self) -> bool {
+        self.state.options.show_scrollbar
     }
 
     // ========== Timezone ==========

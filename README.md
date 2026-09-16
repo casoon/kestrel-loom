@@ -6,7 +6,7 @@ Interactive trading-chart renderer: Rust → WebAssembly → Canvas 2D.
 browser. The chart state, the viewport math and the whole render loop live in plain
 Rust and produce a stream of drawing commands; only a thin façade knows what a canvas
 is. Indicator math is not in this repository — it comes from
-[`kestrel-chartkit`](https://github.com/casoon/kestrel-chartkit), which contributes 91
+[`kestrel-chartkit`](https://github.com/casoon/kestrel-chartkit), which contributes 105
 streaming indicators.
 
 > **Alpha.** The chart runs and is exercised in a browser, but the API is not stable
@@ -60,7 +60,7 @@ chart.tools.trendLine('t1', { time: 1600010000, price: 99 },
                             { time: 1600060000, price: 103 });
 ```
 
-The wrapper groups the façade's 86 flat methods into `data`, `view`, `style`,
+The wrapper groups the façade's 93 flat methods into `data`, `view`, `style`,
 `indicators`, `tools`, `compare` and `state`, and takes care of the parts every caller
 would otherwise write again: canvas sizing with `devicePixelRatio`, a `ResizeObserver`,
 mouse/touch/keyboard wiring, a render loop that only draws when something changed, JSON
@@ -70,13 +70,22 @@ reachable as `chart.raw`.
 ## What it does
 
 - **Chart types** — candlestick, OHLC, hollow, line, area, Heikin Ashi, Renko, footprint
-- **Indicators** — all 91 from `kestrel-chartkit`, fed incrementally (`on_bar` per new
+- **Indicators** — all 105 from `kestrel-chartkit`, fed incrementally (`on_bar` per new
   bar, no window recomputation). Price-unit indicators such as Bollinger, Keltner or
-  Supertrend draw as overlays on the price chart; oscillators get their own pane. Multi-
-  line outputs (MACD signal and histogram, band upper/lower) are drawn, not dropped.
+  Supertrend draw as overlays on the price chart; oscillators get their own pane — and a
+  test keeps that classification honest by probing what each indicator actually computes,
+  rather than trusting a hand-kept list against a catalogue that grows. Multi-line
+  outputs (MACD signal and histogram, band upper/lower) are drawn, not dropped.
 - **Tools** — trend lines, horizontal and vertical lines, rectangles, ellipses,
   Fibonacci retracements, text labels; hit testing, selection, snapping, undo/redo
-- **Interaction** — zoom, pan, crosshair, log/linear price scale, themes
+- **Session-continuous axis** — bars are positioned by index, not by timestamp, so a
+  49-hour weekend takes exactly one bar of width instead of 49 hours of it. Axis ticks
+  sit on calendar boundaries that actually have a bar; hit testing is a direct lookup.
+  Time remains the outward contract — export, tool anchors and the crosshair all speak
+  Unix seconds.
+- **Interaction** — wheel, trackpad and pinch are told apart and handled differently
+  (continuous zoom, two-axis panning, gestures held together across momentum); a slim
+  time scrollbar with a draggable handle; crosshair, log/linear price scale, themes
 - **Scenes** — `kestrel-chartkit`'s `viz::scene` model rendered onto canvas: zones,
   pivots, profiles, with z-order and opacity
 
@@ -90,8 +99,8 @@ it draws what it is given.
 
 ## Status
 
-Working: core, WASM façade, JS wrapper, demo, scenes and indicator artifacts. 208 core
-tests plus 11 façade tests (`wasm-pack test --node`), all in the CI gate — fmt, clippy
+Working: core, WASM façade, JS wrapper, demo, scenes and indicator artifacts. 266 core
+tests plus 15 façade tests (`wasm-pack test --node`), all in the CI gate — fmt, clippy
 `-D warnings`, tests, wasm32 build, `wasm-pack` smoke build, strict rustdoc, and a check
 that the core never grows a browser dependency.
 
@@ -102,8 +111,11 @@ Missing:
 
 - Rendering inside a Tauri webview has been reasoned about, not measured — the engine is
   the same, but that is a conclusion, not a test.
-- Trading pauses are drawn as gaps: the renderer maps time linearly, so an instrument
-  with market hours shows empty weekends. A bar-index mapping is the natural next step.
+- No kinetic scrolling after a gesture ends, and touch handling knows one finger only —
+  there is no two-finger pinch.
+- A second instrument added via `add_compare_symbol` is still mapped by timestamp. With
+  differing market hours that is wrong; it needs mapping through the main instrument's
+  bar index.
 
 ## Provenance
 

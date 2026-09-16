@@ -406,10 +406,14 @@ mod tests {
 
     fn make_viewport() -> Viewport {
         let mut vp = Viewport::new(800, 600);
-        vp.time = TimeRange {
+        let candles: Vec<Candle> = (0..=20)
+            .map(|i| Candle::new(i * 500, 100.0, 110.0, 90.0, 105.0, 1.0))
+            .collect();
+        vp.sync_bars(&candles);
+        vp.set_time_range(TimeRange {
             start: 0,
             end: 10_000,
-        };
+        });
         vp.price = PriceRange {
             min: 90.0,
             max: 110.0,
