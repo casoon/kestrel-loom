@@ -12,6 +12,7 @@
 use chrono::{DateTime, Datelike, Timelike};
 
 use crate::core::bar_index::BarIndex;
+use crate::core::types::Seconds;
 use crate::core::viewport::BarRange;
 
 /// Wie grob die Achse beschriftet wird.
@@ -45,7 +46,7 @@ pub struct AxisTick {
     /// Bar, an der der Sprung stattfindet.
     pub bar: usize,
     /// Zeitstempel dieser Bar (UTC).
-    pub time: i64,
+    pub time: Seconds,
     pub label: String,
     /// Tages- oder gröberer Wechsel — verdient die ausführliche Beschriftung.
     pub major: bool,
@@ -89,7 +90,7 @@ pub fn axis_ticks(
                     AxisTick {
                         bar,
                         time,
-                        label: format_label(time + offset, unit, major),
+                        label: format_label(time.get() + offset, unit, major),
                         major,
                     }
                 })
@@ -109,7 +110,7 @@ pub fn axis_ticks(
             AxisTick {
                 bar,
                 time,
-                label: format_label(time + offset, TickUnit::Year, true),
+                label: format_label(time.get() + offset, TickUnit::Year, true),
                 major: true,
             }
         })
@@ -175,7 +176,7 @@ fn is_boundary(index: &BarIndex, bar: usize, unit: TickUnit, offset: i64) -> boo
         return false;
     };
 
-    bucket(time + offset, unit) != bucket(previous + offset, unit)
+    bucket(time.get() + offset, unit) != bucket(previous.get() + offset, unit)
 }
 
 /// Kennzahl des Zeitabschnitts, in dem ein lokaler Zeitstempel liegt.
@@ -223,7 +224,7 @@ mod tests {
     fn index_of(times: &[i64], duration: i64) -> BarIndex {
         let candles: Vec<Candle> = times
             .iter()
-            .map(|&t| Candle::new(t, 1.0, 2.0, 0.5, 1.5, 1.0))
+            .map(|&t| Candle::new(Seconds::new(t), 1.0, 2.0, 0.5, 1.5, 1.0))
             .collect();
         BarIndex::from_candles(&candles, duration)
     }

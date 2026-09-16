@@ -7,6 +7,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::core::types::Seconds;
+
 // ---------------------------------------------------------------------------
 // Data types
 // ---------------------------------------------------------------------------
@@ -26,7 +28,7 @@ pub struct FootprintLevel {
 pub struct FootprintCandle {
     /// Unix timestamp in seconds (candle open time)
     #[serde(alias = "timestamp")]
-    pub time: i64,
+    pub time: Seconds,
     #[serde(alias = "open")]
     pub o: f64,
     #[serde(alias = "high")]

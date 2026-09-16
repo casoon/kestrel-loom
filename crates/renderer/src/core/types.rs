@@ -1,12 +1,125 @@
 // Core types for kestrel-loom
 
+use std::cmp::Ordering;
+use std::fmt;
+use std::ops::{Add, Sub};
+
 use serde::{Deserialize, Serialize};
+
+/// Ein Zeitpunkt in Unix-Sekunden (UTC).
+///
+/// Der Newtype steht dort, wo vorher nur ein Kommentar stand: `Candle.time`,
+/// Werkzeuganker, Crosshair, `TimeRange` und `BarIndex`. Befund B3 — der
+/// Generator lieferte Millisekunden, alles andere erwartete Sekunden, und
+/// nichts schlug fehl — ist damit nicht mehr formulierbar: aus einer nackten
+/// Zahl wird ein `Seconds` nur über einen ausdrücklichen Schritt.
+///
+/// Über die JS-Grenze bleibt der Wert eine nackte Zahl
+/// (`#[serde(transparent)]`), die Serialisierung ändert sich also nicht.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Serialize, Deserialize,
+)]
+#[serde(transparent)]
+pub struct Seconds(pub i64);
+
+impl Seconds {
+    pub const fn new(value: i64) -> Self {
+        Self(value)
+    }
+
+    /// Die rohen Sekunden — für Formatierung und Rechnungen in `f64`.
+    pub const fn get(self) -> i64 {
+        self.0
+    }
+}
+
+impl From<i64> for Seconds {
+    fn from(value: i64) -> Self {
+        Self(value)
+    }
+}
+
+impl From<Seconds> for i64 {
+    fn from(value: Seconds) -> Self {
+        value.0
+    }
+}
+
+impl fmt::Display for Seconds {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+// Vergleich und Arithmetik mit rohen Sekunden. Das hält lokale Rechnungen, die
+// ohnehin in `i64` stattfinden, lesbar, ohne jede Zwischengröße zu typisieren.
+// Der Schutz liegt an den Feldern und Schnittstellen, nicht an jeder Variable.
+impl PartialEq<i64> for Seconds {
+    fn eq(&self, other: &i64) -> bool {
+        self.0 == *other
+    }
+}
+
+impl PartialEq<Seconds> for i64 {
+    fn eq(&self, other: &Seconds) -> bool {
+        *self == other.0
+    }
+}
+
+impl PartialOrd<i64> for Seconds {
+    fn partial_cmp(&self, other: &i64) -> Option<Ordering> {
+        self.0.partial_cmp(other)
+    }
+}
+
+impl PartialOrd<Seconds> for i64 {
+    fn partial_cmp(&self, other: &Seconds) -> Option<Ordering> {
+        self.partial_cmp(&other.0)
+    }
+}
+
+impl Add<i64> for Seconds {
+    type Output = Seconds;
+
+    fn add(self, rhs: i64) -> Self::Output {
+        Self(self.0 + rhs)
+    }
+}
+
+impl Sub<i64> for Seconds {
+    type Output = Seconds;
+
+    fn sub(self, rhs: i64) -> Self::Output {
+        Self(self.0 - rhs)
+    }
+}
+
+impl std::ops::AddAssign<i64> for Seconds {
+    fn add_assign(&mut self, rhs: i64) {
+        self.0 += rhs;
+    }
+}
+
+impl std::ops::SubAssign<i64> for Seconds {
+    fn sub_assign(&mut self, rhs: i64) {
+        self.0 -= rhs;
+    }
+}
+
+/// Die Differenz zweier Zeitpunkte ist eine Dauer in Sekunden.
+impl Sub<Seconds> for Seconds {
+    type Output = i64;
+
+    fn sub(self, rhs: Seconds) -> Self::Output {
+        self.0 - rhs.0
+    }
+}
 
 /// OHLCV Candle - core data type
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Candle {
     /// Unix timestamp in seconds (not milliseconds!)
-    pub time: i64,
+    pub time: Seconds,
     /// Open price
     pub o: f64,
     /// High price
@@ -20,7 +133,7 @@ pub struct Candle {
 }
 
 impl Candle {
-    pub fn new(time: i64, o: f64, h: f64, l: f64, c: f64, v: f64) -> Self {
+    pub fn new(time: Seconds, o: f64, h: f64, l: f64, c: f64, v: f64) -> Self {
         Self {
             time,
             o,
@@ -141,12 +254,12 @@ impl Candle {
 /// Point on chart (time, price)
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Point {
-    pub time: i64,
+    pub time: Seconds,
     pub price: f64,
 }
 
 impl Point {
-    pub fn new(time: i64, price: f64) -> Self {
+    pub fn new(time: Seconds, price: f64) -> Self {
         Self { time, price }
     }
 }
@@ -330,7 +443,7 @@ mod tests {
 
     #[test]
     fn test_candle_creation() {
-        let candle = Candle::new(1000, 100.0, 105.0, 99.0, 103.0, 1000.0);
+        let candle = Candle::new(Seconds::new(1000), 100.0, 105.0, 99.0, 103.0, 1000.0);
         assert_eq!(candle.time, 1000);
         assert_eq!(candle.o, 100.0);
         assert_eq!(candle.h, 105.0);
@@ -341,18 +454,18 @@ mod tests {
 
     #[test]
     fn test_candle_bullish_bearish() {
-        let bullish = Candle::new(1000, 100.0, 105.0, 99.0, 103.0, 1000.0);
+        let bullish = Candle::new(Seconds::new(1000), 100.0, 105.0, 99.0, 103.0, 1000.0);
         assert!(bullish.is_bullish());
         assert!(!bullish.is_bearish());
 
-        let bearish = Candle::new(1000, 103.0, 105.0, 99.0, 100.0, 1000.0);
+        let bearish = Candle::new(Seconds::new(1000), 103.0, 105.0, 99.0, 100.0, 1000.0);
         assert!(bearish.is_bearish());
         assert!(!bearish.is_bullish());
     }
 
     #[test]
     fn test_candle_calculations() {
-        let candle = Candle::new(1000, 100.0, 105.0, 95.0, 102.0, 1000.0);
+        let candle = Candle::new(Seconds::new(1000), 100.0, 105.0, 95.0, 102.0, 1000.0);
 
         assert_eq!(candle.body_size(), 2.0);
         assert_eq!(candle.range(), 10.0);

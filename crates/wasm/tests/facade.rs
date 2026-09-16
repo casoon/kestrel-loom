@@ -264,3 +264,57 @@ fn tools_with_the_same_id_replace_each_other() {
         "eine ID, ein Werkzeug: {tools}"
     );
 }
+
+#[wasm_bindgen_test]
+fn two_finger_pinch_zooms_in() {
+    let mut chart = chart_with_data(200);
+    let before = time_span(&chart);
+
+    chart.on_touch_pinch(400.0, 200.0, 1.5, 0.0);
+
+    assert!(
+        time_span(&chart) < before,
+        "auseinanderziehen muss hineinzoomen"
+    );
+}
+
+/// Ein Trackpad-Wischer endet abrupt; `tick` holt den Nachlauf nach.
+#[wasm_bindgen_test]
+fn a_released_swipe_glides_after_the_gesture() {
+    let mut chart = chart_with_data(200);
+
+    for step in 0..3 {
+        chart.on_wheel(400.0, 200.0, 8.0, 0.0, false, 0, step as f64 * 16.0);
+    }
+    let at_rest = chart.x_to_time(400.0);
+
+    // Geste setzt aus, der Nachlauf startet und schreitet fort.
+    let _ = chart.tick(300.0);
+    assert!(
+        chart.tick(316.0),
+        "der Nachlauf muss den Ausschnitt weiterziehen"
+    );
+    assert_ne!(
+        chart.x_to_time(400.0),
+        at_rest,
+        "der sichtbare Ausschnitt hat sich bewegt"
+    );
+}
+
+#[wasm_bindgen_test]
+fn the_scrollbar_reports_a_cursor() {
+    let chart = chart_with_data(200);
+
+    // Die Leiste liegt über der Zeitachse am unteren Rand (Höhe 400,
+    // Zeitachse 20 px, Leiste 10 px hoch → y ≈ 370–380).
+    let cursor = chart.scrollbar_cursor_at(400.0, 375.0);
+    assert!(
+        !cursor.is_empty(),
+        "über der Zeitleiste muss eine Cursor-Form gemeldet werden"
+    );
+    assert_eq!(
+        chart.scrollbar_cursor_at(400.0, 10.0),
+        "",
+        "außerhalb der Leiste keine Form"
+    );
+}

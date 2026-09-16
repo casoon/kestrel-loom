@@ -14,9 +14,9 @@
 use std::collections::HashMap;
 
 use kestrel_loom::core::{
-    render_chart, scene_from_indicator_panes, update_indicator_panes, CandleGenerator, ChartState,
-    GeneratorConfig, IndicatorPane, IndicatorPlacement, PriceRange, RenderExtras, TimeRange,
-    Timeframe, Viewport,
+    render_chart, scene_from_indicator_panes, update_indicator_panes, Candle, CandleGenerator,
+    ChartState, GeneratorConfig, IndicatorPane, IndicatorPlacement, PriceRange, RenderExtras,
+    TimeRange, Timeframe, Viewport,
 };
 use kestrel_loom::rendering::{cull_candles, DrawStyle};
 use kestrel_loom::tools::{ChartTool, HorizontalLine, ToolManager, ToolNode, TrendLine};
@@ -529,8 +529,8 @@ fn indicator_artifacts_are_drawn_when_asked_for() {
         state.candles()[0].time,
         state.candles()[state.candles().len() - 1].time,
     );
-    let scene =
-        scene_from_indicator_panes(&panes, Some(span)).expect("Artefakte ergeben eine Szene");
+    let scene = scene_from_indicator_panes(&panes, Some((span.0.get(), span.1.get())))
+        .expect("Artefakte ergeben eine Szene");
     let objects: usize = scene.panes().iter().map(|p| p.objects().len()).sum();
     assert!(objects > 0, "die Szene enthält Objekte");
 
@@ -566,5 +566,79 @@ fn indicator_artifacts_are_drawn_when_asked_for() {
     assert!(
         with > without,
         "mit Artefakten müssen mehr Befehle entstehen ({with} statt {without})"
+    );
+}
+
+/// Ein Vergleichsinstrument wird über den Bar-Index des **Hauptinstruments**
+/// abgebildet, nicht über Zeitstempel. Liegt eine Bar des zweiten Instruments in
+/// einer Handelspause des ersten, sitzt sie zwischen dessen beiden Nachbarbars,
+/// statt eine Position vorzutäuschen — und außerhalb des Bestands wird über die
+/// Bar-Dauer extrapoliert.
+#[test]
+fn a_compare_bar_in_a_trading_break_sits_between_the_neighbours() {
+    use kestrel_loom::core::{CompareSymbol, Seconds};
+    use kestrel_loom::primitives::Color;
+
+    let hour = 3600i64;
+    let friday = 1_789_084_800i64;
+    let mut main_times: Vec<i64> = (0..10).map(|i| friday + i * hour).collect();
+    let friday_close = *main_times.last().unwrap();
+    // 49 Stunden Pause, dann Montag.
+    let monday_open = friday_close + 49 * hour + hour;
+    main_times.extend((0..5).map(|i| monday_open + i * hour));
+
+    let main: Vec<Candle> = main_times
+        .iter()
+        .map(|&t| Candle::new(Seconds::new(t), 100.0, 101.0, 99.0, 100.5, 1.0))
+        .collect();
+
+    // Das zweite Instrument handelt auch am Samstag — dort gibt es im
+    // Hauptinstrument keine Bar.
+    let saturday = friday_close + 25 * hour;
+    let compare: Vec<Candle> = [friday_close, saturday, monday_open]
+        .iter()
+        .map(|&t| Candle::new(Seconds::new(t), 200.0, 201.0, 199.0, 200.5, 1.0))
+        .collect();
+
+    let mut state = ChartState::new(800, 400, Timeframe::H1);
+    state.set_candles(main);
+    state.fit_to_data();
+
+    let symbols = vec![CompareSymbol {
+        symbol: "IDX".to_string(),
+        candles: compare,
+        color: Color::rgba(255, 0, 0, 1.0),
+    }];
+    let extras = RenderExtras {
+        compare_symbols: &symbols,
+        ..Default::default()
+    };
+
+    let mut recorder = BatchRenderer::new(800, 400);
+    render_chart(&mut state, &extras, &mut recorder);
+
+    let points = recorder
+        .commands()
+        .iter()
+        .find_map(|command| match command {
+            RenderCommand::IndicatorLine { points, .. } if points.len() >= 3 => {
+                Some(points.clone())
+            }
+            _ => None,
+        })
+        .expect("die Vergleichslinie wird gezeichnet");
+
+    let x_friday = state.viewport.time_to_x(Seconds::new(friday_close));
+    let x_monday = state.viewport.time_to_x(Seconds::new(monday_open));
+    let x_saturday = state.viewport.time_to_x(Seconds::new(saturday));
+
+    assert!(
+        x_saturday > x_friday && x_saturday < x_monday,
+        "der Samstag liegt zwischen Freitag ({x_friday}) und Montag ({x_monday}), nicht bei {x_saturday}"
+    );
+    assert!(
+        (points[1].0 - x_saturday).abs() < 1e-6,
+        "die Linie folgt derselben Bar-Achse wie der Chart: Punkt {} gegen {x_saturday}",
+        points[1].0
     );
 }

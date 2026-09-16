@@ -15,6 +15,7 @@
 
 use kestrel_chartkit::viz::scene::{LineStyle as SceneLineStyle, Scene, SceneObjectKind};
 
+use crate::core::types::Seconds;
 use crate::core::ChartState;
 use crate::primitives::Color;
 use crate::rendering::{DrawStyle, Renderer};
@@ -56,7 +57,7 @@ fn with_opacity(color: Color, opacity: f64) -> Color {
 /// aufgeteilt — alle Objekte landen im Preisbereich (siehe Modul-Doku).
 pub fn render_scene(scene: &Scene, state: &ChartState, renderer: &mut dyn Renderer) {
     let vp = &state.viewport;
-    let x = |time: f64| vp.time_to_x(time as i64);
+    let x = |time: f64| vp.time_to_x(Seconds::new(time as i64));
     let y = |price: f64| vp.price_to_y(price);
 
     for pane in scene.panes() {
@@ -234,7 +235,7 @@ mod tests {
             0,
             1.0,
             SceneObjectKind::Polyline {
-                points: vec![(start as f64, 100.0), (end as f64, 101.0)],
+                points: vec![(start.get() as f64, 100.0), (end.get() as f64, 101.0)],
                 color: "#58a6ff".to_string(),
                 style: SceneLineStyle::Solid,
                 width: 1.5,
@@ -263,7 +264,7 @@ mod tests {
                 z,
                 1.0,
                 SceneObjectKind::Text {
-                    x: state.candles()[0].time as f64,
+                    x: state.candles()[0].time.get() as f64,
                     y: 100.0,
                     content: id.to_string(),
                     color: "#ffffff".to_string(),
@@ -294,15 +295,17 @@ mod tests {
 
         let artifacts = vec![
             Artifact::Pivot(PivotArtifact {
-                timestamp: state.candles()[40].time,
+                timestamp: state.candles()[40].time.get(),
                 price: 101.0,
                 is_high: true,
                 confirmed: true,
             }),
-            Artifact::Zone(ZoneArtifact::new("supply", 102.0, 101.0).spanning(range.0, range.1)),
+            Artifact::Zone(
+                ZoneArtifact::new("supply", 102.0, 101.0).spanning(range.0.get(), range.1.get()),
+            ),
         ];
 
-        let scene = scene_from_artifacts(&artifacts, Some(range));
+        let scene = scene_from_artifacts(&artifacts, Some((range.0.get(), range.1.get())));
         let mut recorder = BatchRenderer::new(800, 400);
         render_scene(&scene, &state, &mut recorder);
 

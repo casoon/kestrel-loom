@@ -1,4 +1,5 @@
 use super::{ChartTool, ToolNode, ToolType};
+use crate::core::Seconds;
 use crate::core::Viewport;
 use crate::primitives::LineStyle;
 use crate::rendering::{Renderer, TextAlign, TextBaseline};
@@ -25,7 +26,7 @@ impl HorizontalLine {
         }
     }
 
-    pub fn with_price(id: String, time: i64, price: f64) -> Self {
+    pub fn with_price(id: String, time: Seconds, price: f64) -> Self {
         Self {
             id,
             nodes: vec![ToolNode::new(time, price)],

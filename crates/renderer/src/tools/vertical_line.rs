@@ -1,4 +1,5 @@
 use super::{ChartTool, ToolNode, ToolType};
+use crate::core::Seconds;
 use crate::core::Viewport;
 use crate::rendering::{Renderer, TextAlign, TextBaseline};
 use crate::Color;
@@ -22,7 +23,7 @@ impl VerticalLine {
         }
     }
 
-    pub fn with_time(id: String, time: i64, price: f64) -> Self {
+    pub fn with_time(id: String, time: Seconds, price: f64) -> Self {
         Self {
             id,
             nodes: vec![ToolNode::new(time, price)],
@@ -37,7 +38,7 @@ impl VerticalLine {
         }
     }
 
-    pub fn time(&self) -> Option<i64> {
+    pub fn time(&self) -> Option<Seconds> {
         self.nodes.first().map(|n| n.time)
     }
 }
@@ -69,7 +70,7 @@ impl ChartTool for VerticalLine {
 
             // Draw time label at bottom
             let label_y = viewport.dimensions.height as f64 - 25.0;
-            let date = chrono::DateTime::from_timestamp(time, 0)
+            let date = chrono::DateTime::from_timestamp(time.get(), 0)
                 .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
                 .unwrap_or_else(|| time.to_string());
 

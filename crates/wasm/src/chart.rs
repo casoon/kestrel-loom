@@ -9,7 +9,7 @@ use web_sys::HtmlCanvasElement;
 use kestrel_loom::core::wheel_zoom_factor;
 use kestrel_loom::core::{
     Candle, ChartState, EventHandler, FootprintCandle, KeyboardEvent, MouseButton, MouseEvent,
-    Timeframe, TouchEvent, WheelInput,
+    Seconds, Timeframe, TouchEvent, WheelInput,
 };
 
 use crate::canvas2d::Canvas2DRenderer;
@@ -28,7 +28,7 @@ pub struct WasmChart {
     compare_symbols: Vec<CompareSymbol>,
     footprint_candles: Vec<FootprintCandle>,
     footprint_enabled: bool,
-    drawing_drag_anchor: Option<(i64, f64)>,
+    drawing_drag_anchor: Option<(Seconds, f64)>,
     indicator_panes: Vec<IndicatorPane>,
     draw_indicator_artifacts: bool,
     scene: Option<kestrel_loom::core::Scene>,
@@ -151,7 +151,7 @@ impl WasmChart {
     /// Add a single candle
     #[wasm_bindgen(js_name = addCandle)]
     pub fn add_candle(&mut self, time: i64, o: f64, h: f64, l: f64, c: f64, v: f64) {
-        let candle = Candle::new(time, o, h, l, c, v);
+        let candle = Candle::new(Seconds::new(time), o, h, l, c, v);
         self.state.add_candle(candle);
     }
 
@@ -397,26 +397,59 @@ impl WasmChart {
 
     /// Handle touch start
     #[wasm_bindgen(js_name = onTouchStart)]
-    pub fn on_touch_start(&mut self, x: f64, y: f64) {
-        let event = TouchEvent::Start { x, y };
+    pub fn on_touch_start(&mut self, x: f64, y: f64, timestamp_ms: f64) {
+        let event = TouchEvent::Start { x, y, timestamp_ms };
         self.event_handler
             .handle_touch_event(event, &mut self.state);
     }
 
     /// Handle touch move
     #[wasm_bindgen(js_name = onTouchMove)]
-    pub fn on_touch_move(&mut self, x: f64, y: f64) {
-        let event = TouchEvent::Move { x, y };
+    pub fn on_touch_move(&mut self, x: f64, y: f64, timestamp_ms: f64) {
+        let event = TouchEvent::Move { x, y, timestamp_ms };
         self.event_handler
             .handle_touch_event(event, &mut self.state);
     }
 
     /// Handle touch end
     #[wasm_bindgen(js_name = onTouchEnd)]
-    pub fn on_touch_end(&mut self, x: f64, y: f64) {
-        let event = TouchEvent::End { x, y };
+    pub fn on_touch_end(&mut self, x: f64, y: f64, timestamp_ms: f64) {
+        let event = TouchEvent::End { x, y, timestamp_ms };
         self.event_handler
             .handle_touch_event(event, &mut self.state);
+    }
+
+    /// Zwei-Finger-Pinch. `scale` ist die Änderung der Fingerdistanz seit dem
+    /// vorigen Ereignis — der Browser liefert keinen Zoomfaktor für Touch.
+    #[wasm_bindgen(js_name = onTouchPinch)]
+    pub fn on_touch_pinch(&mut self, center_x: f64, center_y: f64, scale: f64, timestamp_ms: f64) {
+        let event = TouchEvent::Pinch {
+            center_x,
+            center_y,
+            scale,
+            timestamp_ms,
+        };
+        self.event_handler
+            .handle_touch_event(event, &mut self.state);
+    }
+
+    /// Trägheit fortschreiben — je Frame mit `performance.now()` aufrufen.
+    ///
+    /// Gibt `true`, solange sich der Ausschnitt noch bewegt. Ohne diesen Aufruf
+    /// gibt es keinen Nachlauf; der Kern befragt selbst keine Uhr (A4).
+    #[wasm_bindgen(js_name = tick)]
+    pub fn tick(&mut self, now_ms: f64) -> bool {
+        self.event_handler.tick(now_ms, &mut self.state)
+    }
+
+    /// Cursor-Form über der Zeitleiste: `"grab"`, `"ew-resize"`, `"pointer"`,
+    /// `"grabbing"` oder leer außerhalb.
+    #[wasm_bindgen(js_name = scrollbarCursorAt)]
+    pub fn scrollbar_cursor_at(&self, x: f64, y: f64) -> String {
+        self.state
+            .scrollbar_cursor(x, y)
+            .unwrap_or_default()
+            .to_string()
     }
 
     /// Handle keyboard event
@@ -726,12 +759,12 @@ impl WasmChart {
         self._push_undo();
 
         let start_node = ToolNode {
-            time: start_time,
+            time: Seconds::new(start_time),
             price: start_price,
         };
 
         let end_node = ToolNode {
-            time: end_time,
+            time: Seconds::new(end_time),
             price: end_price,
         };
 
@@ -748,7 +781,7 @@ impl WasmChart {
         use kestrel_loom::tools::HorizontalLine;
 
         self._push_undo();
-        let tool = HorizontalLine::with_price(id.to_string(), 0, price);
+        let tool = HorizontalLine::with_price(id.to_string(), Seconds::new(0), price);
         self.state.tool_manager.add_tool(Box::new(tool));
         self.state.mark_dirty();
 
@@ -761,7 +794,7 @@ impl WasmChart {
         use kestrel_loom::tools::VerticalLine;
 
         self._push_undo();
-        let tool = VerticalLine::with_time(id.to_string(), time, 0.0);
+        let tool = VerticalLine::with_time(id.to_string(), Seconds::new(time), 0.0);
         self.state.tool_manager.add_tool(Box::new(tool));
         self.state.mark_dirty();
 
@@ -802,11 +835,11 @@ impl WasmChart {
         let tool = Rectangle::with_corners(
             id.to_string(),
             ToolNode {
-                time: t1,
+                time: Seconds::new(t1),
                 price: p1,
             },
             ToolNode {
-                time: t2,
+                time: Seconds::new(t2),
                 price: p2,
             },
         );
@@ -830,11 +863,11 @@ impl WasmChart {
         let tool = FibonacciRetracement::with_points(
             id.to_string(),
             ToolNode {
-                time: t1,
+                time: Seconds::new(t1),
                 price: p1,
             },
             ToolNode {
-                time: t2,
+                time: Seconds::new(t2),
                 price: p2,
             },
         );
@@ -854,7 +887,14 @@ impl WasmChart {
     ) -> Result<(), JsValue> {
         use kestrel_loom::tools::{TextLabel, ToolNode};
         self._push_undo();
-        let tool = TextLabel::new(id.to_string(), ToolNode { time, price }, text);
+        let tool = TextLabel::new(
+            id.to_string(),
+            ToolNode {
+                time: Seconds::new(time),
+                price,
+            },
+            text,
+        );
         self.state.tool_manager.add_tool(Box::new(tool));
         self.state.mark_dirty();
         Ok(())
@@ -1304,13 +1344,13 @@ impl WasmChart {
     /// dieselbe Achse benutzen, und die lässt sich von außen nicht nachrechnen.
     #[wasm_bindgen(js_name = timeToX)]
     pub fn time_to_x(&self, time: i64) -> f64 {
-        self.state.viewport.time_to_x(time)
+        self.state.viewport.time_to_x(Seconds::new(time))
     }
 
     /// Zeitstempel an einer Bildschirmposition.
     #[wasm_bindgen(js_name = xToTime)]
     pub fn x_to_time(&self, x: f64) -> i64 {
-        self.state.viewport.x_to_time(x)
+        self.state.viewport.x_to_time(x).get()
     }
 
     /// Leerraum rechts vom letzten Bar, in Bars.
@@ -1360,11 +1400,11 @@ impl WasmChart {
         let tool = Ellipse::with_corners(
             id.to_string(),
             ToolNode {
-                time: t1,
+                time: Seconds::new(t1),
                 price: p1,
             },
             ToolNode {
-                time: t2,
+                time: Seconds::new(t2),
                 price: p2,
             },
         );
@@ -1410,6 +1450,7 @@ impl WasmChart {
     pub fn snap_to_candle_wasm(&self, time: i64, price: f64) -> JsValue {
         use kestrel_loom::core::MagnetMode;
         let threshold_px = 20.0;
+        let time = Seconds::new(time);
         let (snapped_time, snapped_price) = match self.state.magnet_mode {
             MagnetMode::Off => (time, price),
             MagnetMode::Weak | MagnetMode::Strong => self.state.tool_manager.snap_to_candle(
@@ -1422,7 +1463,7 @@ impl WasmChart {
         };
         let snapped = snapped_time != time || snapped_price != price;
         let info = serde_json::json!({
-            "time": snapped_time,
+            "time": snapped_time.get(),
             "price": snapped_price,
             "snapped": snapped,
         });

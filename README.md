@@ -84,12 +84,14 @@ reachable as `chart.raw`.
   Time remains the outward contract — export, tool anchors and the crosshair all speak
   Unix seconds.
 - **Interaction** — wheel, trackpad and pinch are told apart and handled differently
-  (continuous zoom, two-axis panning, gestures held together across momentum); a slim
-  time scrollbar with a draggable handle; crosshair, log/linear price scale, themes
+  (continuous zoom, two-axis panning, gestures held together across momentum, kinetic
+  glide after release); a slim time scrollbar with a draggable handle and a cursor that
+  shows a grab hand over it; crosshair, log/linear price scale, themes
 - **Scenes** — `kestrel-chartkit`'s `viz::scene` model rendered onto canvas: zones,
   pivots, profiles, with z-order and opacity
 
-Time is Unix **seconds**, UTC, everywhere — the same domain the scene model declares.
+Time is Unix **seconds**, UTC, everywhere — a `Seconds` newtype in the core, so a
+millisecond value cannot slip in silently, and the same domain the scene model declares.
 
 ## What it does not do
 
@@ -99,8 +101,8 @@ it draws what it is given.
 
 ## Status
 
-Working: core, WASM façade, JS wrapper, demo, scenes and indicator artifacts. 266 core
-tests plus 15 façade tests (`wasm-pack test --node`), all in the CI gate — fmt, clippy
+Working: core, WASM façade, JS wrapper, demo, scenes and indicator artifacts. 274 core
+tests plus 18 façade tests (`wasm-pack test --node`), all in the CI gate — fmt, clippy
 `-D warnings`, tests, wasm32 build, `wasm-pack` smoke build, strict rustdoc, and a check
 that the core never grows a browser dependency.
 
@@ -111,11 +113,8 @@ Missing:
 
 - Rendering inside a Tauri webview has been reasoned about, not measured — the engine is
   the same, but that is a conclusion, not a test.
-- No kinetic scrolling after a gesture ends, and touch handling knows one finger only —
-  there is no two-finger pinch.
-- A second instrument added via `add_compare_symbol` is still mapped by timestamp. With
-  differing market hours that is wrong; it needs mapping through the main instrument's
-  bar index.
+- Kinetic glide, two-finger pinch and the scrollbar cursor are covered by tests through
+  the façade, but the gestures themselves have not been re-checked on real hardware.
 
 ## Provenance
 

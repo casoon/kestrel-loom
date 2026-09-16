@@ -81,10 +81,20 @@ export async function createChart(canvas, options = {}) {
     const r = canvas.getBoundingClientRect();
     return [e.clientX - r.left, e.clientY - r.top];
   };
+  const distance = (a, b) => Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+  const midpoint = (a, b) => ({
+    clientX: (a.clientX + b.clientX) / 2,
+    clientY: (a.clientY + b.clientY) / 2,
+  });
 
   if (autoInput) {
     on(canvas, 'mousedown', (e) => chart.onMouseDown(...local(e), e.button));
-    on(canvas, 'mousemove', (e) => chart.onMouseMove(...local(e)));
+    on(canvas, 'mousemove', (e) => {
+      const [x, y] = local(e);
+      chart.onMouseMove(x, y);
+      // Greifhand über dem Griff, Größenänderung an seinen Rändern.
+      canvas.style.cursor = chart.scrollbarCursorAt(x, y);
+    });
     on(window, 'mouseup', (e) => chart.onMouseUp(...local(e), e.button));
     on(canvas, 'mouseleave', () => chart.onMouseLeave());
     on(canvas, 'dblclick', (e) => chart.onDoubleClick(...local(e)));
@@ -106,17 +116,40 @@ export async function createChart(canvas, options = {}) {
       },
       { passive: false },
     );
+
+    // Zwei Finger sind eine Pinch-Geste, ein Finger verschiebt. Der Browser
+    // liefert für Touch keinen Zoomfaktor, also wird die Fingerdistanz selbst
+    // ins Verhältnis gesetzt.
+    let pinchDistance = null;
     on(canvas, 'touchstart', (e) => {
+      if (e.touches.length >= 2) {
+        pinchDistance = distance(e.touches[0], e.touches[1]);
+        return;
+      }
       const touch = e.touches[0];
-      if (touch) chart.onTouchStart(...local(touch));
+      if (touch) chart.onTouchStart(...local(touch), e.timeStamp);
     });
     on(canvas, 'touchmove', (e) => {
+      if (e.touches.length >= 2) {
+        const next = distance(e.touches[0], e.touches[1]);
+        if (pinchDistance) {
+          chart.onTouchPinch(
+            ...local(midpoint(e.touches[0], e.touches[1])),
+            next / pinchDistance,
+            e.timeStamp,
+          );
+        }
+        pinchDistance = next;
+        return;
+      }
+      pinchDistance = null;
       const touch = e.touches[0];
-      if (touch) chart.onTouchMove(...local(touch));
+      if (touch) chart.onTouchMove(...local(touch), e.timeStamp);
     });
     on(canvas, 'touchend', (e) => {
+      if (e.touches.length === 0) pinchDistance = null;
       const touch = e.changedTouches[0];
-      if (touch) chart.onTouchEnd(...local(touch));
+      if (touch) chart.onTouchEnd(...local(touch), e.timeStamp);
     });
     on(window, 'keydown', (e) => chart.onKeyDown(e.key));
   }
@@ -133,6 +166,9 @@ export async function createChart(canvas, options = {}) {
   const draw = () => chart.render();
   const loop = () => {
     if (!running) return;
+    // Nachlauf nach einer Wischgeste fortschreiben; markiert den Zustand als
+    // verändert, solange er sich bewegt.
+    chart.tick(performance.now());
     if (chart.isDirty()) draw();
     frame = requestAnimationFrame(loop);
   };

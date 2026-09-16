@@ -56,6 +56,6 @@ pub use pane::{Pane, PaneLayout};
 pub use scale::{PriceScale, ScaleMode};
 pub use scrollbar::{ScrollbarGeometry, ScrollbarHit, Thumb, SCROLLBAR_HEIGHT};
 pub use time_axis::{axis_ticks, AxisTick, TickUnit};
-pub use types::{Candle, Point, SessionConfig, Timeframe};
+pub use types::{Candle, Point, Seconds, SessionConfig, Timeframe};
 pub use viewport::{Dimensions, PriceRange, TimeRange, Viewport, ViewportScaleMode};
 pub use wheel::{zoom_factor as wheel_zoom_factor, WheelGesture, WheelInput, WheelInterpreter};

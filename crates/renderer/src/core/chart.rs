@@ -1,6 +1,10 @@
 // Chart - main chart struct
 
-use super::{buffer::ChartBuffer, config::ChartConfig, types::Candle};
+use super::{
+    buffer::ChartBuffer,
+    config::ChartConfig,
+    types::{Candle, Seconds},
+};
 
 /// Main chart structure
 #[derive(Debug, Clone)]
@@ -93,7 +97,7 @@ impl Chart {
     }
 
     /// Get time range (earliest, latest)
-    pub fn time_range(&self) -> Option<(i64, i64)> {
+    pub fn time_range(&self) -> Option<(Seconds, Seconds)> {
         if self.is_empty() {
             return None;
         }
@@ -106,12 +110,12 @@ impl Chart {
     }
 
     /// Find candle by timestamp
-    pub fn find_by_time(&self, time: i64) -> Option<(usize, &Candle)> {
+    pub fn find_by_time(&self, time: Seconds) -> Option<(usize, &Candle)> {
         self.buffer.find_by_time(time)
     }
 
     /// Find nearest candle to timestamp
-    pub fn find_nearest(&self, time: i64) -> Option<(usize, &Candle)> {
+    pub fn find_nearest(&self, time: Seconds) -> Option<(usize, &Candle)> {
         self.buffer.find_nearest(time)
     }
 
@@ -142,7 +146,14 @@ mod tests {
     use super::*;
 
     fn create_test_candle(time: i64, close: f64) -> Candle {
-        Candle::new(time, close - 1.0, close + 1.0, close - 2.0, close, 1000.0)
+        Candle::new(
+            Seconds::new(time),
+            close - 1.0,
+            close + 1.0,
+            close - 2.0,
+            close,
+            1000.0,
+        )
     }
 
     #[test]

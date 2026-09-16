@@ -1,6 +1,6 @@
 // Chart buffer - ring buffer for candles
 
-use super::types::Candle;
+use super::types::{Candle, Seconds};
 use std::collections::VecDeque;
 
 /// Ring buffer for candle data with fixed capacity
@@ -122,7 +122,7 @@ impl ChartBuffer {
     }
 
     /// Find candle by timestamp (exact match)
-    pub fn find_by_time(&self, time: i64) -> Option<(usize, &Candle)> {
+    pub fn find_by_time(&self, time: Seconds) -> Option<(usize, &Candle)> {
         self.candles
             .iter()
             .enumerate()
@@ -130,7 +130,7 @@ impl ChartBuffer {
     }
 
     /// Find nearest candle to given timestamp
-    pub fn find_nearest(&self, time: i64) -> Option<(usize, &Candle)> {
+    pub fn find_nearest(&self, time: Seconds) -> Option<(usize, &Candle)> {
         if self.is_empty() {
             return None;
         }
@@ -172,7 +172,7 @@ mod tests {
     use super::*;
 
     fn create_test_candle(time: i64) -> Candle {
-        Candle::new(time, 100.0, 101.0, 99.0, 100.5, 1000.0)
+        Candle::new(Seconds::new(time), 100.0, 101.0, 99.0, 100.5, 1000.0)
     }
 
     #[test]
@@ -200,7 +200,7 @@ mod tests {
         buffer.push(create_test_candle(1000));
         buffer.push(create_test_candle(2000));
 
-        let updated = Candle::new(2000, 105.0, 106.0, 104.0, 105.5, 2000.0);
+        let updated = Candle::new(Seconds::new(2000), 105.0, 106.0, 104.0, 105.5, 2000.0);
         buffer.update_last(updated.clone());
 
         assert_eq!(buffer.len(), 2);
@@ -230,11 +230,11 @@ mod tests {
         buffer.push(create_test_candle(2000));
         buffer.push(create_test_candle(3000));
 
-        let (idx, candle) = buffer.find_by_time(2000).unwrap();
+        let (idx, candle) = buffer.find_by_time(Seconds::new(2000)).unwrap();
         assert_eq!(idx, 1);
         assert_eq!(candle.time, 2000);
 
-        assert!(buffer.find_by_time(9999).is_none());
+        assert!(buffer.find_by_time(Seconds::new(9999)).is_none());
     }
 
     #[test]
@@ -245,11 +245,11 @@ mod tests {
         buffer.push(create_test_candle(5000));
         buffer.push(create_test_candle(9000));
 
-        let (idx, candle) = buffer.find_nearest(4500).unwrap();
+        let (idx, candle) = buffer.find_nearest(Seconds::new(4500)).unwrap();
         assert_eq!(idx, 1);
         assert_eq!(candle.time, 5000);
 
-        let (idx, candle) = buffer.find_nearest(500).unwrap();
+        let (idx, candle) = buffer.find_nearest(Seconds::new(500)).unwrap();
         assert_eq!(idx, 0);
         assert_eq!(candle.time, 1000);
     }

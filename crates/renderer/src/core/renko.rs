@@ -103,9 +103,10 @@ pub fn compute_renko(candles: &[Candle], brick_size: f64) -> Vec<Candle> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::Seconds;
 
     fn make_candle(time: i64, c: f64) -> Candle {
-        Candle::new(time, c, c + 1.0, c - 1.0, c, 100.0)
+        Candle::new(Seconds::new(time), c, c + 1.0, c - 1.0, c, 100.0)
     }
 
     #[test]

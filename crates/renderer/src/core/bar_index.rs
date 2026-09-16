@@ -11,13 +11,14 @@
 //!
 //! Siehe `plan/spezifikation/02-bar-index-achse.md`.
 
+use crate::core::types::Seconds;
 use crate::core::Candle;
 
 /// Zeitstempel in Indexreihenfolge, plus die Bar-Dauer für alles außerhalb.
 #[derive(Debug, Clone, Default)]
 pub struct BarIndex {
     /// Aufsteigend sortiert; die Position **ist** der logische Index.
-    times: Vec<i64>,
+    times: Vec<Seconds>,
     /// Dauer einer Bar in Sekunden — nur zum Extrapolieren jenseits der Daten.
     bar_duration_secs: i64,
 }
@@ -52,7 +53,7 @@ impl BarIndex {
     ///
     /// Der Weg für den Live-Betrieb: `from_candles` bei jeder eintreffenden Bar
     /// wäre eine O(n)-Kopie je Tick.
-    pub fn push_bar(&mut self, time: i64) {
+    pub fn push_bar(&mut self, time: Seconds) {
         match self.times.last() {
             Some(&last) if last == time => {}
             Some(&last) if last > time => {
@@ -67,12 +68,12 @@ impl BarIndex {
     }
 
     /// Exakter Index eines Zeitstempels.
-    pub fn time_to_index(&self, time: i64) -> Option<usize> {
+    pub fn time_to_index(&self, time: Seconds) -> Option<usize> {
         self.times.binary_search(&time).ok()
     }
 
     /// Zeitstempel eines Index — O(1).
-    pub fn index_to_time(&self, index: usize) -> Option<i64> {
+    pub fn index_to_time(&self, index: usize) -> Option<Seconds> {
         self.times.get(index).copied()
     }
 
@@ -85,7 +86,7 @@ impl BarIndex {
     }
 
     /// Erster und letzter Zeitstempel.
-    pub fn span(&self) -> Option<(i64, i64)> {
+    pub fn span(&self) -> Option<(Seconds, Seconds)> {
         match (self.times.first(), self.times.last()) {
             (Some(&a), Some(&b)) => Some((a, b)),
             _ => None,
@@ -96,7 +97,7 @@ impl BarIndex {
     /// Zeitfenster.
     ///
     /// Gibt `(0, 0)`, wenn keine Bar im Fenster liegt.
-    pub fn visible_range(&self, start: i64, end: i64) -> (usize, usize) {
+    pub fn visible_range(&self, start: Seconds, end: Seconds) -> (usize, usize) {
         let first = self.times.partition_point(|&t| t < start);
         let last = self.times.partition_point(|&t| t <= end);
         if first >= last {
@@ -117,56 +118,61 @@ impl BarIndex {
     ///   und die Zeichenfläche rechts vom letzten Bar weiter funktionieren.
     ///
     /// Ohne Daten ist der Index leer; dann bleibt nur die Extrapolation ab 0.
-    pub fn time_to_fractional_index(&self, time: i64) -> f64 {
+    pub fn time_to_fractional_index(&self, time: Seconds) -> f64 {
         let n = self.times.len();
         if n == 0 {
             return 0.0;
         }
 
+        let time = time.get();
         // Erste Position mit times[pos] >= time
-        let pos = self.times.partition_point(|&t| t < time);
+        let pos = self.times.partition_point(|&t| t.get() < time);
 
         if pos == n {
-            let last = self.times[n - 1];
+            let last = self.times[n - 1].get();
             return (n - 1) as f64 + (time - last) as f64 / self.bar_duration_secs as f64;
         }
-        if self.times[pos] == time {
+        if self.times[pos].get() == time {
             return pos as f64;
         }
         if pos == 0 {
-            let first = self.times[0];
+            let first = self.times[0].get();
             return (time - first) as f64 / self.bar_duration_secs as f64;
         }
 
-        let before = self.times[pos - 1];
-        let after = self.times[pos];
+        let before = self.times[pos - 1].get();
+        let after = self.times[pos].get();
         let width = (after - before) as f64;
         (pos - 1) as f64 + (time - before) as f64 / width
     }
 
     /// Gegenrichtung zu [`Self::time_to_fractional_index`] — für Crosshair,
     /// Achsenbeschriftung und Export.
-    pub fn fractional_index_to_time(&self, index: f64) -> i64 {
+    pub fn fractional_index_to_time(&self, index: f64) -> Seconds {
         let n = self.times.len();
         if n == 0 {
-            return 0;
+            return Seconds::default();
         }
 
         if index <= 0.0 {
-            return self.times[0] + (index * self.bar_duration_secs as f64).round() as i64;
+            return Seconds::new(
+                self.times[0].get() + (index * self.bar_duration_secs as f64).round() as i64,
+            );
         }
         let last_index = (n - 1) as f64;
         if index >= last_index {
-            return self.times[n - 1]
-                + ((index - last_index) * self.bar_duration_secs as f64).round() as i64;
+            return Seconds::new(
+                self.times[n - 1].get()
+                    + ((index - last_index) * self.bar_duration_secs as f64).round() as i64,
+            );
         }
 
         let floor = index.floor();
         let frac = index - floor;
         let i = floor as usize;
-        let before = self.times[i];
-        let after = self.times[i + 1];
-        before + ((after - before) as f64 * frac).round() as i64
+        let before = self.times[i].get();
+        let after = self.times[i + 1].get();
+        Seconds::new(before + ((after - before) as f64 * frac).round() as i64)
     }
 }
 
@@ -179,7 +185,7 @@ mod tests {
     fn index_from(times: &[i64], duration: i64) -> BarIndex {
         let candles: Vec<Candle> = times
             .iter()
-            .map(|&t| Candle::new(t, 1.0, 2.0, 0.5, 1.5, 100.0))
+            .map(|&t| Candle::new(Seconds::new(t), 1.0, 2.0, 0.5, 1.5, 100.0))
             .collect();
         BarIndex::from_candles(&candles, duration)
     }
@@ -196,46 +202,49 @@ mod tests {
     fn an_empty_index_has_no_positions() {
         let idx = BarIndex::empty(H1);
         assert!(idx.is_empty());
-        assert_eq!(idx.time_to_index(0), None);
+        assert_eq!(idx.time_to_index(Seconds::new(0)), None);
         assert_eq!(idx.index_to_time(0), None);
-        assert_eq!(idx.visible_range(0, 1000), (0, 0));
+        assert_eq!(
+            idx.visible_range(Seconds::new(0), Seconds::new(1000)),
+            (0, 0)
+        );
         assert_eq!(idx.span(), None);
     }
 
     #[test]
     fn exact_timestamps_map_to_their_position() {
         let idx = index_from(&[0, 300, 600, 900, 1200], 300);
-        assert_eq!(idx.time_to_index(0), Some(0));
-        assert_eq!(idx.time_to_index(900), Some(3));
-        assert_eq!(idx.time_to_index(500), None);
-        assert_eq!(idx.index_to_time(4), Some(1200));
+        assert_eq!(idx.time_to_index(Seconds::new(0)), Some(0));
+        assert_eq!(idx.time_to_index(Seconds::new(900)), Some(3));
+        assert_eq!(idx.time_to_index(Seconds::new(500)), None);
+        assert_eq!(idx.index_to_time(4), Some(Seconds::new(1200)));
         assert_eq!(idx.index_to_time(5), None);
     }
 
     #[test]
     fn a_timestamp_on_a_bar_has_an_integer_index() {
         let idx = index_from(&[0, 300, 600], 300);
-        assert_eq!(idx.time_to_fractional_index(300), 1.0);
+        assert_eq!(idx.time_to_fractional_index(Seconds::new(300)), 1.0);
     }
 
     #[test]
     fn a_timestamp_between_bars_interpolates() {
         let idx = index_from(&[0, 300, 600], 300);
-        assert_eq!(idx.time_to_fractional_index(150), 0.5);
-        assert_eq!(idx.time_to_fractional_index(450), 1.5);
+        assert_eq!(idx.time_to_fractional_index(Seconds::new(150)), 0.5);
+        assert_eq!(idx.time_to_fractional_index(Seconds::new(450)), 1.5);
     }
 
     #[test]
     fn a_timestamp_beyond_the_last_bar_extrapolates() {
         let idx = index_from(&[0, 300, 600], 300);
-        assert_eq!(idx.time_to_fractional_index(900), 3.0);
-        assert_eq!(idx.time_to_fractional_index(1050), 3.5);
+        assert_eq!(idx.time_to_fractional_index(Seconds::new(900)), 3.0);
+        assert_eq!(idx.time_to_fractional_index(Seconds::new(1050)), 3.5);
     }
 
     #[test]
     fn a_timestamp_before_the_first_bar_is_negative() {
         let idx = index_from(&[1000, 1300, 1600], 300);
-        assert_eq!(idx.time_to_fractional_index(700), -1.0);
+        assert_eq!(idx.time_to_fractional_index(Seconds::new(700)), -1.0);
     }
 
     /// Der Kern des ganzen Umbaus: eine 49-Stunden-Pause darf genau eine
@@ -244,8 +253,8 @@ mod tests {
     fn a_trading_break_is_exactly_one_bar_wide() {
         let idx = weekend_index();
 
-        let friday = idx.time_to_fractional_index(9 * H1);
-        let monday = idx.time_to_fractional_index(9 * H1 + 50 * H1);
+        let friday = idx.time_to_fractional_index(Seconds::new(9 * H1));
+        let monday = idx.time_to_fractional_index(Seconds::new(9 * H1 + 50 * H1));
         assert_eq!(friday, 9.0);
         assert_eq!(monday, 10.0);
         assert_eq!(
@@ -255,7 +264,7 @@ mod tests {
         );
 
         // Mitten im Wochenende: auf halber Strecke zwischen den beiden Bars.
-        let saturday = idx.time_to_fractional_index(9 * H1 + 25 * H1);
+        let saturday = idx.time_to_fractional_index(Seconds::new(9 * H1 + 25 * H1));
         assert!(
             (saturday - 9.5).abs() < 0.02,
             "Mitte der Pause liegt in der Mitte der einen Bar-Breite, war {saturday}"
@@ -266,10 +275,10 @@ mod tests {
     fn time_survives_the_round_trip() {
         let idx = weekend_index();
         for &time in &[0, 3 * H1, 9 * H1, 9 * H1 + 50 * H1, 9 * H1 + 54 * H1] {
-            let f = idx.time_to_fractional_index(time);
+            let f = idx.time_to_fractional_index(Seconds::new(time));
             assert_eq!(
                 idx.fractional_index_to_time(f),
-                time,
+                Seconds::new(time),
                 "Rundgang für {time} über Index {f}"
             );
         }
@@ -279,31 +288,40 @@ mod tests {
     fn the_round_trip_also_holds_outside_the_data() {
         let idx = index_from(&[1000, 1300, 1600], 300);
         for &time in &[100, 400, 1900, 3000] {
-            let f = idx.time_to_fractional_index(time);
-            assert_eq!(idx.fractional_index_to_time(f), time);
+            let f = idx.time_to_fractional_index(Seconds::new(time));
+            assert_eq!(idx.fractional_index_to_time(f), Seconds::new(time));
         }
     }
 
     #[test]
     fn visible_range_covers_the_window() {
         let idx = index_from(&[0, 300, 600, 900, 1200], 300);
-        assert_eq!(idx.visible_range(0, 1200), (0, 5));
-        assert_eq!(idx.visible_range(300, 900), (1, 4));
-        assert_eq!(idx.visible_range(5000, 9000), (0, 0));
+        assert_eq!(
+            idx.visible_range(Seconds::new(0), Seconds::new(1200)),
+            (0, 5)
+        );
+        assert_eq!(
+            idx.visible_range(Seconds::new(300), Seconds::new(900)),
+            (1, 4)
+        );
+        assert_eq!(
+            idx.visible_range(Seconds::new(5000), Seconds::new(9000)),
+            (0, 0)
+        );
     }
 
     #[test]
     fn a_new_bar_appends_in_place() {
         let mut idx = index_from(&[0, 300], 300);
-        idx.push_bar(600);
+        idx.push_bar(Seconds::new(600));
         assert_eq!(idx.len(), 3);
-        assert_eq!(idx.time_to_fractional_index(600), 2.0);
+        assert_eq!(idx.time_to_fractional_index(Seconds::new(600)), 2.0);
     }
 
     #[test]
     fn repeating_the_last_bar_does_not_grow_the_index() {
         let mut idx = index_from(&[0, 300], 300);
-        idx.push_bar(300);
+        idx.push_bar(Seconds::new(300));
         assert_eq!(
             idx.len(),
             2,
@@ -314,8 +332,8 @@ mod tests {
     #[test]
     fn an_out_of_order_bar_restores_the_ordering() {
         let mut idx = index_from(&[0, 600], 300);
-        idx.push_bar(300);
-        assert_eq!(idx.index_to_time(1), Some(300));
-        assert_eq!(idx.index_to_time(2), Some(600));
+        idx.push_bar(Seconds::new(300));
+        assert_eq!(idx.index_to_time(1), Some(Seconds::new(300)));
+        assert_eq!(idx.index_to_time(2), Some(Seconds::new(600)));
     }
 }

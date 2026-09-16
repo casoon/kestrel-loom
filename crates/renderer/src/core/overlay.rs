@@ -115,12 +115,21 @@ mod tests {
     fn make_viewport() -> Viewport {
         let mut vp = Viewport::new(800, 600);
         let candles: Vec<crate::core::Candle> = (0..11)
-            .map(|i| crate::core::Candle::new(1000 + i * 100, 100.0, 200.0, 100.0, 150.0, 1.0))
+            .map(|i| {
+                crate::core::Candle::new(
+                    crate::core::Seconds::new(1000 + i * 100),
+                    100.0,
+                    200.0,
+                    100.0,
+                    150.0,
+                    1.0,
+                )
+            })
             .collect();
         vp.sync_bars(&candles);
         vp.set_time_range(TimeRange {
-            start: 1000,
-            end: 2000,
+            start: crate::core::Seconds::new(1000),
+            end: crate::core::Seconds::new(2000),
         });
         vp.price = PriceRange {
             min: 100.0,

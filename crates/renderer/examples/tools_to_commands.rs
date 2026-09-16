@@ -7,7 +7,7 @@
 //!
 //! `cargo run -p kestrel-loom --example tools_to_commands`
 
-use kestrel_loom::core::{PriceRange, TimeRange};
+use kestrel_loom::core::{PriceRange, Seconds, TimeRange};
 use kestrel_loom::tools::{ChartTool, HorizontalLine, ToolManager, ToolNode, TrendLine};
 use kestrel_loom::{BatchRenderer, RenderCommand, Viewport};
 
@@ -15,8 +15,8 @@ fn main() {
     let mut viewport = Viewport::new(800, 400);
     viewport.fit_to_data(
         TimeRange {
-            start: 1_600_000_000,
-            end: 1_600_036_000,
+            start: Seconds::new(1_600_000_000),
+            end: Seconds::new(1_600_036_000),
         },
         PriceRange {
             min: 95.0,
@@ -28,13 +28,19 @@ fn main() {
 
     // Trendlinie über zwei Stützpunkte in Zeit/Preis — nicht in Pixeln.
     let mut trend = TrendLine::new(tools.generate_id("trend"));
-    trend.nodes_mut().push(ToolNode::new(1_600_006_000, 97.0));
-    trend.nodes_mut().push(ToolNode::new(1_600_030_000, 103.0));
+    trend
+        .nodes_mut()
+        .push(ToolNode::new(Seconds::new(1_600_006_000), 97.0));
+    trend
+        .nodes_mut()
+        .push(ToolNode::new(Seconds::new(1_600_030_000), 103.0));
     tools.add_tool(Box::new(trend));
 
     // Horizontale Linie auf einem Preisniveau.
     let mut level = HorizontalLine::new(tools.generate_id("level"));
-    level.nodes_mut().push(ToolNode::new(0, 100.0));
+    level
+        .nodes_mut()
+        .push(ToolNode::new(Seconds::new(0), 100.0));
     tools.add_tool(Box::new(level));
 
     println!("Werkzeuge: {}", tools.count());

@@ -1,3 +1,4 @@
+use crate::core::Seconds;
 use crate::core::Viewport;
 use crate::rendering::Renderer;
 use crate::Color;
@@ -23,12 +24,12 @@ pub use vertical_line::VerticalLine;
 /// Tool node - represents a point in price/time space
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ToolNode {
-    pub time: i64,  // Unix timestamp in seconds
-    pub price: f64, // Price level
+    pub time: Seconds, // Unix timestamp in seconds
+    pub price: f64,    // Price level
 }
 
 impl ToolNode {
-    pub fn new(time: i64, price: f64) -> Self {
+    pub fn new(time: Seconds, price: f64) -> Self {
         Self { time, price }
     }
 }
@@ -271,12 +272,12 @@ impl ToolManager {
     /// original point if nothing is close enough.
     pub fn snap_to_candle(
         &self,
-        time: i64,
+        time: Seconds,
         price: f64,
         candles: &[crate::core::Candle],
         threshold_px: f64,
         viewport: &Viewport,
-    ) -> (i64, f64) {
+    ) -> (Seconds, f64) {
         let px = viewport.time_to_x(time);
         let py = viewport.price_to_y(price);
 
@@ -384,11 +385,15 @@ mod tests {
         let mut manager = ToolManager::new();
 
         let mut first = horizontal_line::HorizontalLine::new("dup".to_string());
-        first.nodes_mut().push(ToolNode::new(0, 100.0));
+        first
+            .nodes_mut()
+            .push(ToolNode::new(Seconds::new(0), 100.0));
         manager.add_tool(Box::new(first));
 
         let mut second = horizontal_line::HorizontalLine::new("dup".to_string());
-        second.nodes_mut().push(ToolNode::new(0, 102.0));
+        second
+            .nodes_mut()
+            .push(ToolNode::new(Seconds::new(0), 102.0));
         manager.add_tool(Box::new(second));
 
         assert_eq!(manager.count(), 1, "eine ID, ein Werkzeug");
@@ -407,12 +412,12 @@ mod tests {
     fn make_viewport() -> Viewport {
         let mut vp = Viewport::new(800, 600);
         let candles: Vec<Candle> = (0..=20)
-            .map(|i| Candle::new(i * 500, 100.0, 110.0, 90.0, 105.0, 1.0))
+            .map(|i| Candle::new(Seconds::new(i * 500), 100.0, 110.0, 90.0, 105.0, 1.0))
             .collect();
         vp.sync_bars(&candles);
         vp.set_time_range(TimeRange {
-            start: 0,
-            end: 10_000,
+            start: Seconds::new(0),
+            end: Seconds::new(10_000),
         });
         vp.price = PriceRange {
             min: 90.0,
@@ -422,14 +427,18 @@ mod tests {
     }
 
     fn make_hline(id: &str, price: f64) -> Box<dyn ChartTool> {
-        Box::new(HorizontalLine::with_price(id.to_string(), 1000, price))
+        Box::new(HorizontalLine::with_price(
+            id.to_string(),
+            Seconds::new(1000),
+            price,
+        ))
     }
 
     fn make_trendline(id: &str) -> Box<dyn ChartTool> {
         Box::new(TrendLine::with_nodes(
             id.to_string(),
-            ToolNode::new(1000, 100.0),
-            ToolNode::new(5000, 105.0),
+            ToolNode::new(Seconds::new(1000), 100.0),
+            ToolNode::new(Seconds::new(5000), 105.0),
         ))
     }
 
@@ -513,7 +522,7 @@ mod tests {
     // --- snap_to_candle ---
 
     fn make_candle(time: i64, o: f64, h: f64, l: f64, c: f64) -> Candle {
-        Candle::new(time, o, h, l, c, 1000.0)
+        Candle::new(Seconds::new(time), o, h, l, c, 1000.0)
     }
 
     #[test]
@@ -524,7 +533,8 @@ mod tests {
         let candles = vec![make_candle(1000, 99.0, 101.0, 98.0, 100.0)];
 
         // Query very close to the candle close point
-        let (snapped_time, snapped_price) = mgr.snap_to_candle(1000, 100.0, &candles, 20.0, &vp);
+        let (snapped_time, snapped_price) =
+            mgr.snap_to_candle(Seconds::new(1000), 100.0, &candles, 20.0, &vp);
         assert_eq!(snapped_time, 1000);
         assert!((snapped_price - 100.0).abs() < 1e-10);
     }
@@ -537,7 +547,8 @@ mod tests {
         let candles = vec![make_candle(1000, 99.0, 101.0, 98.0, 100.0)];
 
         // Query far away (time=9000, price=90) — pixel distance >> threshold
-        let (snapped_time, snapped_price) = mgr.snap_to_candle(9000, 90.0, &candles, 5.0, &vp);
+        let (snapped_time, snapped_price) =
+            mgr.snap_to_candle(Seconds::new(9000), 90.0, &candles, 5.0, &vp);
         assert_eq!(snapped_time, 9000);
         assert!((snapped_price - 90.0).abs() < 1e-10);
     }

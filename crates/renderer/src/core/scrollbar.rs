@@ -50,6 +50,19 @@ pub enum ScrollbarHit {
     TrackAfter,
 }
 
+impl ScrollbarHit {
+    /// Die Cursor-Form, die diese Trefferzone anzeigt.
+    ///
+    /// Der Kern zeichnet nur; die Einbindung setzt daraus `canvas.style.cursor`.
+    pub fn cursor(self) -> &'static str {
+        match self {
+            ScrollbarHit::Body => "grab",
+            ScrollbarHit::Start | ScrollbarHit::End => "ew-resize",
+            ScrollbarHit::TrackBefore | ScrollbarHit::TrackAfter => "pointer",
+        }
+    }
+}
+
 impl ScrollbarGeometry {
     /// Der darstellbare Bar-Bereich: der Datenbestand, erweitert um den
     /// Ausschnitt, falls über den Rand hinaus verschoben wurde.
@@ -231,5 +244,14 @@ mod tests {
         assert!((geometry.bar_at(0.0, bars, 100) - -0.5).abs() < 1e-6);
         assert!((geometry.bar_at(800.0, bars, 100) - 99.5).abs() < 1e-6);
         assert!((geometry.bar_at(400.0, bars, 100) - 49.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn each_hit_zone_names_its_cursor() {
+        assert_eq!(ScrollbarHit::Body.cursor(), "grab");
+        assert_eq!(ScrollbarHit::Start.cursor(), "ew-resize");
+        assert_eq!(ScrollbarHit::End.cursor(), "ew-resize");
+        assert_eq!(ScrollbarHit::TrackBefore.cursor(), "pointer");
+        assert_eq!(ScrollbarHit::TrackAfter.cursor(), "pointer");
     }
 }

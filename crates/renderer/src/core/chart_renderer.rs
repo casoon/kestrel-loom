@@ -9,6 +9,7 @@ use std::collections::HashMap;
 
 use crate::core::indicators::{IndicatorPlacement, IndicatorSeries};
 use crate::core::scrollbar::{ScrollbarGeometry, SCROLLBAR_HEIGHT};
+use crate::core::types::Seconds;
 use crate::core::{Candle, ChartState, FootprintCandle};
 use crate::primitives::Color;
 use crate::rendering::Renderer;
@@ -413,8 +414,8 @@ pub fn render_chart(state: &mut ChartState, extras: &RenderExtras, renderer: &mu
             let chart_width = vp.dimensions.width as f64;
             let chart_height = vp.dimensions.height as f64;
             let visible_time = vp.time_range();
-            let time_start = visible_time.start;
-            let time_end = visible_time.end;
+            let time_start = visible_time.start.get();
+            let time_end = visible_time.end.get();
 
             // Iterate over each day in the visible range (±1 day buffer)
             let day_secs: i64 = 86400;
@@ -435,7 +436,7 @@ pub fn render_chart(state: &mut ChartState, extras: &RenderExtras, renderer: &mu
                         let open_ts =
                             day + session.open_utc.0 as i64 * 3600 + session.open_utc.1 as i64 * 60;
                         if open_ts >= time_start && open_ts <= time_end {
-                            let x = vp.time_to_x(open_ts);
+                            let x = vp.time_to_x(crate::core::Seconds::new(open_ts));
                             if x >= 0.0 && x <= chart_width {
                                 renderer.draw_line(x, 0.0, x, chart_height, line_color, 1.0);
                             }
@@ -446,7 +447,7 @@ pub fn render_chart(state: &mut ChartState, extras: &RenderExtras, renderer: &mu
                             + session.close_utc.0 as i64 * 3600
                             + session.close_utc.1 as i64 * 60;
                         if close_ts >= time_start && close_ts <= time_end {
-                            let x = vp.time_to_x(close_ts);
+                            let x = vp.time_to_x(crate::core::Seconds::new(close_ts));
                             if x >= 0.0 && x <= chart_width {
                                 let dashed_color = crate::primitives::Color::rgba(
                                     session.color.0,
@@ -479,7 +480,7 @@ pub fn render_chart(state: &mut ChartState, extras: &RenderExtras, renderer: &mu
 
     if draw_indicator_artifacts {
         let fallback = match (state.candles().first(), state.candles().last()) {
-            (Some(first), Some(last)) => Some((first.time, last.time)),
+            (Some(first), Some(last)) => Some((first.time.get(), last.time.get())),
             _ => None,
         };
         if let Some(artifact_scene) = scene_from_indicator_panes(indicator_panes, fallback) {
@@ -580,7 +581,7 @@ fn render_compare_symbols(
             continue;
         };
 
-        let values: Vec<(i64, f64)> = visible
+        let values: Vec<(Seconds, f64)> = visible
             .iter()
             .filter_map(|candle| {
                 if candle.c.is_finite() {
@@ -636,6 +637,11 @@ fn render_compare_symbols(
     }
 
     for (idx, (symbol, color, values)) in series.iter().enumerate() {
+        // Über den Bar-Index des **Hauptinstruments** abgebildet, nicht über
+        // Zeitstempel: `time_to_x` fragt den Hauptindex. Eine Bar des zweiten
+        // Instruments, die in eine Handelspause des ersten fällt, landet damit
+        // zwischen dessen Nachbarbars, statt eine Position vorzutäuschen; außer-
+        // halb des Bestands wird über die Bar-Dauer extrapoliert.
         let points: Vec<(f64, f64)> = values
             .iter()
             .map(|(time, percent)| (vp.time_to_x(*time), percent_to_y(*percent)))
@@ -891,7 +897,7 @@ fn render_indicator_panes(
 
         // Alle Linien des Indikators, auf eine gemeinsame Skala gebracht.
         let visible_time = vp.time_range();
-        let lines: Vec<Vec<(i64, f64)>> = pane
+        let lines: Vec<Vec<(Seconds, f64)>> = pane
             .series
             .lines()
             .map(|line| {

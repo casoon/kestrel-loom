@@ -25,11 +25,35 @@ pub enum MouseEvent {
 }
 
 /// Touch event types (for mobile)
+///
+/// Trägt seinen Zeitstempel selbst (`event.timeStamp` des Browsers) — die
+/// Trägheit nach dem Loslassen braucht eine Geschwindigkeit, und die Uhr wird
+/// nach A4 hereingereicht, nicht im Kern geholt.
 #[derive(Debug, Clone)]
 pub enum TouchEvent {
-    Start { x: f64, y: f64 },
-    Move { x: f64, y: f64 },
-    End { x: f64, y: f64 },
+    Start {
+        x: f64,
+        y: f64,
+        timestamp_ms: f64,
+    },
+    Move {
+        x: f64,
+        y: f64,
+        timestamp_ms: f64,
+    },
+    End {
+        x: f64,
+        y: f64,
+        timestamp_ms: f64,
+    },
+    /// Zwei-Finger-Pinch. `scale` ist das Verhältnis der Fingerdistanz zur
+    /// vorigen — `> 1` heißt auseinanderziehen, also hineinzoomen.
+    Pinch {
+        center_x: f64,
+        center_y: f64,
+        scale: f64,
+        timestamp_ms: f64,
+    },
     Cancel,
 }
 
@@ -39,6 +63,32 @@ pub enum KeyboardEvent {
     KeyDown { key: String },
     KeyUp { key: String },
 }
+
+/// Nachlauf einer Wischgeste: Geschwindigkeit in Pixel je Millisekunde.
+///
+/// Ein Trackpad-Wischer endet abrupt, weil der Browser keinen Nachlauf liefert;
+/// die Magic Mouse schickt ihren selbst. Ohne diesen Nachlauf wirkt ein
+/// Trackpad-Schwung wie ein Festhalten und Loslassen.
+#[derive(Debug, Clone, Copy)]
+struct Momentum {
+    vx: f64,
+    vy: f64,
+    /// Zeitstempel des letzten Fortschritts.
+    last_ts: f64,
+}
+
+/// Ab dieser Geschwindigkeit (px/ms) beginnt ein Nachlauf. Darunter war es ein
+/// langsames Schieben, kein Wurf.
+const MOMENTUM_MIN_SPEED: f64 = 0.03;
+/// Zeitkonstante des Abklingens — nach dieser Zeitspanne ist die Geschwindigkeit
+/// auf 1/e gefallen.
+const MOMENTUM_DECAY_MS: f64 = 220.0;
+/// Ein einzelner Frame rechnet höchstens so weit — sonst springt der Chart,
+/// wenn der Tab im Hintergrund war und `tick` lange nicht lief.
+const MOMENTUM_MAX_FRAME_MS: f64 = 64.0;
+/// Solange zusammenhängende Rad-Ereignisse dichter liegen, ist die Wischgeste
+/// nicht zu Ende. Muss zu `wheel::LATCH_MS` passen.
+const MOMENTUM_LATCH_MS: f64 = 200.0;
 
 /// Event handler for chart interactions
 pub struct EventHandler {
@@ -52,6 +102,17 @@ pub struct EventHandler {
     double_click_threshold: f64, // milliseconds
     /// Deutet Rad-/Trackpad-Ereignisse und hält die laufende Geste fest
     wheel: WheelInterpreter,
+    /// Laufender Nachlauf nach dem Loslassen.
+    momentum: Option<Momentum>,
+    /// Letzter Zeitstempel und Geschwindigkeit eines Trackpad-Pans — wird zum
+    /// Nachlauf, sobald die Geste aussetzt.
+    wheel_pan_ts: f64,
+    wheel_pan_vx: f64,
+    wheel_pan_vy: f64,
+    /// Letzter Zeitstempel eines Ein-Finger-Zugs (Touch).
+    last_touch_ts: f64,
+    touch_vx: f64,
+    touch_vy: f64,
 }
 
 impl EventHandler {
@@ -63,7 +124,80 @@ impl EventHandler {
             last_click_time: 0.0,
             double_click_threshold: 300.0,
             wheel: WheelInterpreter::new(),
+            momentum: None,
+            wheel_pan_ts: f64::NEG_INFINITY,
+            wheel_pan_vx: 0.0,
+            wheel_pan_vy: 0.0,
+            last_touch_ts: 0.0,
+            touch_vx: 0.0,
+            touch_vy: 0.0,
         }
+    }
+
+    /// Trägheit fortschreiben.
+    ///
+    /// Muss je Frame mit einem hereingereichten Zeitstempel aufgerufen werden
+    /// (`performance.now()`). Gibt `true`, solange sich der Ausschnitt noch
+    /// bewegt — die Zeichenschleife zeichnet dann weiter. Ohne Aufruf gibt es
+    /// keinen Nachlauf, statt dass der Kern selbst eine Uhr befragt (A4).
+    pub fn tick(&mut self, now_ms: f64, state: &mut ChartState) -> bool {
+        self.start_wheel_momentum(now_ms);
+
+        let Some(momentum) = self.momentum.as_mut() else {
+            return false;
+        };
+
+        let dt = now_ms - momentum.last_ts;
+        if !(0.0..=MOMENTUM_MAX_FRAME_MS).contains(&dt) || dt <= 0.0 {
+            return false;
+        }
+        momentum.last_ts = now_ms;
+
+        let dx = momentum.vx * dt;
+        let dy = momentum.vy * dt;
+        let decay = (-dt / MOMENTUM_DECAY_MS).exp();
+        momentum.vx *= decay;
+        momentum.vy *= decay;
+
+        if momentum.vx.hypot(momentum.vy) < MOMENTUM_MIN_SPEED {
+            self.momentum = None;
+        }
+
+        let (dx, dy) = (dx.round() as i32, dy.round() as i32);
+        if dx == 0 && dy == 0 {
+            return self.momentum.is_some();
+        }
+        state.pan(dx, dy);
+        true
+    }
+
+    /// Ein ausgesetzter Trackpad-Pan wird zum Nachlauf.
+    fn start_wheel_momentum(&mut self, now_ms: f64) {
+        if self.momentum.is_some() {
+            return;
+        }
+        if now_ms - self.wheel_pan_ts <= MOMENTUM_LATCH_MS {
+            return;
+        }
+        let speed = self.wheel_pan_vx.hypot(self.wheel_pan_vy);
+        if speed >= MOMENTUM_MIN_SPEED {
+            self.momentum = Some(Momentum {
+                vx: self.wheel_pan_vx,
+                vy: self.wheel_pan_vy,
+                last_ts: now_ms,
+            });
+        }
+        // Einmalig: der Kandidat darf nicht erneut zünden.
+        self.wheel_pan_ts = f64::NEG_INFINITY;
+        self.wheel_pan_vx = 0.0;
+        self.wheel_pan_vy = 0.0;
+    }
+
+    fn stop_momentum(&mut self) {
+        self.momentum = None;
+        self.wheel_pan_ts = f64::NEG_INFINITY;
+        self.touch_vx = 0.0;
+        self.touch_vy = 0.0;
     }
 
     /// Handle mouse event and update chart state
@@ -94,6 +228,8 @@ impl EventHandler {
         if button != MouseButton::Left {
             return;
         }
+
+        self.stop_momentum();
 
         // Die Zeitleiste hat Vorrang: sie liegt über dem Chart, und ein Klick
         // dort darf nicht als Pan des Kursbilds ankommen.
@@ -212,9 +348,23 @@ impl EventHandler {
 
         match gesture {
             WheelGesture::Zoom { factor, center_x } => {
+                self.stop_momentum();
                 state.zoom(factor, Some(center_x.max(0.0) as u32));
             }
             WheelGesture::Pan { delta_x, delta_y } => {
+                // Ein neues Verschieben übernimmt wieder die Führung.
+                self.momentum = None;
+                let dt = input.timestamp_ms - self.wheel_pan_ts;
+                if (0.0..MOMENTUM_LATCH_MS).contains(&dt) {
+                    // Rad-Deltas zeigen in die Gegenrichtung des Ziehens.
+                    self.wheel_pan_vx = -delta_x / dt;
+                    self.wheel_pan_vy = -delta_y / dt;
+                } else {
+                    self.wheel_pan_vx = 0.0;
+                    self.wheel_pan_vy = 0.0;
+                }
+                self.wheel_pan_ts = input.timestamp_ms;
+
                 // Rad-Deltas zeigen in die Gegenrichtung des Ziehens: nach unten
                 // scrollen schiebt den Inhalt nach oben.
                 state.pan(-delta_x as i32, -delta_y as i32);
@@ -237,24 +387,57 @@ impl EventHandler {
     /// Handle touch event (for mobile support)
     pub fn handle_touch_event(&mut self, event: TouchEvent, state: &mut ChartState) {
         match event {
-            TouchEvent::Start { x, y } => {
+            TouchEvent::Start { x, y, timestamp_ms } => {
+                self.stop_momentum();
                 self.is_dragging = true;
                 self.last_drag_x = x;
                 self.last_drag_y = y;
+                self.last_touch_ts = timestamp_ms;
                 state.start_pan(x, y);
             }
-            TouchEvent::Move { x, y } => {
+            TouchEvent::Move { x, y, timestamp_ms } => {
                 if self.is_dragging {
                     let delta_x = (x - self.last_drag_x) as i32;
                     let delta_y = (y - self.last_drag_y) as i32;
+
+                    let dt = timestamp_ms - self.last_touch_ts;
+                    if dt > 0.0 {
+                        self.touch_vx = delta_x as f64 / dt;
+                        self.touch_vy = delta_y as f64 / dt;
+                    }
 
                     state.pan(delta_x, delta_y);
 
                     self.last_drag_x = x;
                     self.last_drag_y = y;
+                    self.last_touch_ts = timestamp_ms;
                 }
             }
-            TouchEvent::End { x: _, y: _ } | TouchEvent::Cancel => {
+            TouchEvent::End {
+                x: _,
+                y: _,
+                timestamp_ms,
+            } => {
+                self.is_dragging = false;
+                state.end_interaction();
+                if self.touch_vx.hypot(self.touch_vy) >= MOMENTUM_MIN_SPEED {
+                    self.momentum = Some(Momentum {
+                        vx: self.touch_vx,
+                        vy: self.touch_vy,
+                        last_ts: timestamp_ms,
+                    });
+                }
+            }
+            TouchEvent::Pinch {
+                center_x, scale, ..
+            } => {
+                if scale.is_finite() && scale > 0.0 {
+                    self.stop_momentum();
+                    // Finger auseinanderziehen (scale > 1) zoomt hinein.
+                    state.zoom(1.0 / scale, Some(center_x.max(0.0) as u32));
+                }
+            }
+            TouchEvent::Cancel => {
                 self.is_dragging = false;
                 state.end_interaction();
             }
@@ -379,7 +562,14 @@ mod tests {
         let candles: Vec<_> = (0..200)
             .map(|i| {
                 let t = 1_600_000_000 + i * 3600;
-                crate::core::Candle::new(t, 100.0, 105.0, 95.0, 102.0, 10.0)
+                crate::core::Candle::new(
+                    crate::core::Seconds::new(t),
+                    100.0,
+                    105.0,
+                    95.0,
+                    102.0,
+                    10.0,
+                )
             })
             .collect();
         state.set_candles(candles);
@@ -452,6 +642,155 @@ mod tests {
 
         handler.handle_mouse_event(MouseEvent::DoubleClick { x: 1.0, y: 1.0 }, &mut state);
         assert!(!state.viewport.price_locked);
+    }
+
+    // --- Trägheit ---
+
+    #[test]
+    fn without_momentum_a_tick_does_nothing() {
+        let mut handler = EventHandler::new();
+        let mut state = fitted_state();
+        assert!(!handler.tick(1_000.0, &mut state));
+    }
+
+    /// Ein Trackpad-Wischer endet abrupt, weil der Browser keinen Nachlauf
+    /// liefert. Der Kern holt ihn nach, sobald die Geste aussetzt.
+    #[test]
+    fn a_released_swipe_glides_on_and_decays() {
+        let mut handler = EventHandler::new();
+        let mut state = fitted_state();
+
+        // Drei Verschiebe-Ereignisse, dicht beieinander.
+        for step in 0..3 {
+            handler.handle_mouse_event(wheel(8.0, 0.0, step as f64 * 16.0), &mut state);
+        }
+        let at_rest = state.viewport.bars();
+
+        // Geste ist ausgesetzt: der Nachlauf startet und bewegt weiter.
+        assert!(
+            !handler.tick(300.0, &mut state),
+            "Startframe bewegt noch nicht"
+        );
+        assert!(
+            handler.tick(316.0, &mut state),
+            "der Nachlauf muss den Ausschnitt weiterziehen"
+        );
+        assert!(
+            state.viewport.bars() != at_rest,
+            "der Ausschnitt hat sich bewegt"
+        );
+
+        // Und er endet von selbst.
+        let mut stopped = false;
+        for step in 1..400 {
+            if !handler.tick(316.0 + step as f64 * 16.0, &mut state) {
+                stopped = true;
+                break;
+            }
+        }
+        assert!(stopped, "der Nachlauf muss abklingen");
+    }
+
+    #[test]
+    fn a_pinch_does_not_start_a_momentum() {
+        let mut handler = EventHandler::new();
+        let mut state = fitted_state();
+        handler.handle_mouse_event(wheel(8.0, 0.0, 0.0), &mut state);
+        // Klassisches Rad statt Wischer: kein Nachlauf.
+        handler.handle_mouse_event(wheel(0.0, -100.0, 10.0), &mut state);
+
+        assert!(!handler.tick(1_000.0, &mut state));
+    }
+
+    #[test]
+    fn a_pressed_mouse_stops_the_momentum() {
+        let mut handler = EventHandler::new();
+        let mut state = fitted_state();
+        for step in 0..3 {
+            handler.handle_mouse_event(wheel(8.0, 0.0, step as f64 * 16.0), &mut state);
+        }
+        assert!(!handler.tick(300.0, &mut state));
+
+        handler.handle_mouse_event(
+            MouseEvent::Down {
+                x: 10.0,
+                y: 10.0,
+                button: MouseButton::Left,
+            },
+            &mut state,
+        );
+        assert!(
+            !handler.tick(316.0, &mut state),
+            "der Nachlauf ist abgebrochen"
+        );
+    }
+
+    // --- Pinch ---
+
+    #[test]
+    fn two_fingers_spreading_zoom_in() {
+        let mut handler = EventHandler::new();
+        let mut state = fitted_state();
+        let before = state.viewport.bars().span();
+
+        handler.handle_touch_event(
+            TouchEvent::Pinch {
+                center_x: 400.0,
+                center_y: 300.0,
+                scale: 1.5,
+                timestamp_ms: 0.0,
+            },
+            &mut state,
+        );
+
+        assert!(
+            state.viewport.bars().span() < before,
+            "auseinanderziehen muss hineinzoomen"
+        );
+    }
+
+    #[test]
+    fn a_released_touch_swipe_glides_on() {
+        let mut handler = EventHandler::new();
+        let mut state = fitted_state();
+
+        handler.handle_touch_event(
+            TouchEvent::Start {
+                x: 400.0,
+                y: 300.0,
+                timestamp_ms: 0.0,
+            },
+            &mut state,
+        );
+        handler.handle_touch_event(
+            TouchEvent::Move {
+                x: 420.0,
+                y: 300.0,
+                timestamp_ms: 16.0,
+            },
+            &mut state,
+        );
+        handler.handle_touch_event(
+            TouchEvent::Move {
+                x: 440.0,
+                y: 300.0,
+                timestamp_ms: 32.0,
+            },
+            &mut state,
+        );
+        handler.handle_touch_event(
+            TouchEvent::End {
+                x: 440.0,
+                y: 300.0,
+                timestamp_ms: 32.0,
+            },
+            &mut state,
+        );
+
+        let at_rest = state.viewport.bars();
+        handler.tick(48.0, &mut state);
+        assert!(handler.tick(64.0, &mut state));
+        assert!(state.viewport.bars() != at_rest);
     }
 
     // --- Zeitleiste ---

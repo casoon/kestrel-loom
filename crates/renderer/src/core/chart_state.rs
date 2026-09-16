@@ -1,6 +1,6 @@
 //! Chart State Management - Central state container for the chart engine
 
-use super::types::{Candle, SessionConfig, Timeframe};
+use super::types::{Candle, Seconds, SessionConfig, Timeframe};
 use super::viewport::{BarRange, PriceRange, TimeRange, Viewport};
 use crate::primitives::{CandleStyle, Color};
 
@@ -62,7 +62,7 @@ pub struct CrosshairState {
     pub visible: bool,
     pub x: f64,
     pub y: f64,
-    pub time: i64,
+    pub time: Seconds,
     pub price: f64,
 }
 
@@ -72,7 +72,7 @@ impl Default for CrosshairState {
             visible: false,
             x: 0.0,
             y: 0.0,
-            time: 0,
+            time: Seconds::default(),
             price: 0.0,
         }
     }
@@ -264,6 +264,29 @@ impl ChartState {
         )
     }
 
+    /// Cursor-Form über der Zeitleiste — `None`, wenn der Zeiger woanders ist.
+    ///
+    /// Der Kern zeichnet nur; die Einbindung setzt daraus `canvas.style.cursor`.
+    /// Vorher gab es keine Trefferabfrage über die Fassade, also ließ sich die
+    /// Greifhand am Griff von außen nicht anzeigen.
+    pub fn scrollbar_cursor(&self, x: f64, y: f64) -> Option<&'static str> {
+        if !self.options.show_scrollbar || self.viewport.bar_count() == 0 {
+            return None;
+        }
+
+        if self.is_scrolling() {
+            return Some("grabbing");
+        }
+
+        let geometry = super::chart_renderer::scrollbar_geometry(
+            self.viewport.dimensions.width as f64,
+            self.viewport.dimensions.height as f64,
+        );
+        geometry
+            .hit(self.viewport.bars(), self.viewport.bar_count(), x, y)
+            .map(super::scrollbar::ScrollbarHit::cursor)
+    }
+
     /// Setzt die Ansicht zurück: Preissperre lösen und auf die Daten einpassen.
     pub fn reset_view(&mut self) {
         self.viewport.price_locked = false;
@@ -316,7 +339,7 @@ impl ChartState {
     }
 
     /// Find candle at a given time
-    pub fn candle_at_time(&self, time: i64) -> Option<&Candle> {
+    pub fn candle_at_time(&self, time: Seconds) -> Option<&Candle> {
         self.candles.iter().find(|c| c.time == time)
     }
 
@@ -429,8 +452,8 @@ mod tests {
     fn test_set_candles_and_fit() {
         let mut state = ChartState::new(800, 600, Timeframe::M5);
         let candles = vec![
-            Candle::new(1000, 100.0, 105.0, 95.0, 102.0, 1000.0),
-            Candle::new(1300, 102.0, 108.0, 100.0, 106.0, 1200.0),
+            Candle::new(Seconds::new(1000), 100.0, 105.0, 95.0, 102.0, 1000.0),
+            Candle::new(Seconds::new(1300), 102.0, 108.0, 100.0, 106.0, 1200.0),
         ];
 
         state.set_candles(candles);

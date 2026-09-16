@@ -2,7 +2,7 @@
 //
 // Generate candles for different asset types with realistic characteristics
 
-use super::types::{Candle, Timeframe};
+use super::types::{Candle, Seconds, Timeframe};
 use std::f64::consts::PI;
 
 /// Market type with specific characteristics
@@ -334,7 +334,7 @@ impl CandleGenerator {
         // Update current price for next candle
         self.current_price = close;
 
-        Candle::new(time, open, high, low, close, volume)
+        Candle::new(Seconds::new(time), open, high, low, close, volume)
     }
 
     /// Reset generator to initial state
@@ -352,7 +352,14 @@ impl CandleGenerator {
         let open = self.current_price;
         self.candle_start_time = self.current_time;
 
-        let candle = Candle::new(self.candle_start_time, open, open, open, open, 0.0);
+        let candle = Candle::new(
+            Seconds::new(self.candle_start_time),
+            open,
+            open,
+            open,
+            open,
+            0.0,
+        );
 
         self.current_candle = Some(candle.clone());
         candle

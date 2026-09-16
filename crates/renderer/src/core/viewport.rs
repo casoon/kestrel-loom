@@ -14,13 +14,13 @@
 //! und Modell: `plan/spezifikation/02-bar-index-achse.md`.
 
 use crate::core::bar_index::BarIndex;
-use crate::core::types::{Candle, Timeframe};
+use crate::core::types::{Candle, Seconds, Timeframe};
 
 /// Time range in seconds (unix timestamp)
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TimeRange {
-    pub start: i64,
-    pub end: i64,
+    pub start: Seconds,
+    pub end: Seconds,
 }
 
 /// Sichtbarer Ausschnitt in fraktionalen Bar-Indizes.
@@ -161,7 +161,7 @@ impl Viewport {
     }
 
     /// Hängt eine einzelne Bar an (Live-Betrieb).
-    pub fn push_bar(&mut self, time: i64) {
+    pub fn push_bar(&mut self, time: Seconds) {
         self.index.push_bar(time);
     }
 
@@ -335,12 +335,12 @@ impl Viewport {
     }
 
     /// Convert time to x pixel coordinate
-    pub fn time_to_x(&self, time: i64) -> f64 {
+    pub fn time_to_x(&self, time: Seconds) -> f64 {
         self.bar_to_x(self.index.time_to_fractional_index(time))
     }
 
     /// Convert x pixel to time
-    pub fn x_to_time(&self, x: f64) -> i64 {
+    pub fn x_to_time(&self, x: f64) -> Seconds {
         self.index.fractional_index_to_time(self.x_to_bar(x))
     }
 
@@ -397,12 +397,12 @@ impl Viewport {
     }
 
     /// Get viewport time start (for optimizations)
-    pub fn time_start(&self) -> i64 {
+    pub fn time_start(&self) -> Seconds {
         self.time_range().start
     }
 
     /// Get viewport time end (for optimizations)
-    pub fn time_end(&self) -> i64 {
+    pub fn time_end(&self) -> Seconds {
         self.time_range().end
     }
 
@@ -513,7 +513,7 @@ mod tests {
     fn candles_at(times: &[i64]) -> Vec<Candle> {
         times
             .iter()
-            .map(|&t| Candle::new(t, 100.0, 105.0, 95.0, 102.0, 10.0))
+            .map(|&t| Candle::new(Seconds::new(t), 100.0, 105.0, 95.0, 102.0, 10.0))
             .collect()
     }
 
@@ -528,8 +528,8 @@ mod tests {
         vp.sync_bars(&candles_at(&times));
         vp.fit_to_data(
             TimeRange {
-                start: times[0],
-                end: *times.last().unwrap(),
+                start: Seconds::new(times[0]),
+                end: Seconds::new(*times.last().unwrap()),
             },
             PriceRange {
                 min: 90.0,
@@ -546,8 +546,8 @@ mod tests {
         vp.sync_bars(&candles_at(&times));
         vp.fit_to_data(
             TimeRange {
-                start: times[0],
-                end: *times.last().unwrap(),
+                start: Seconds::new(times[0]),
+                end: Seconds::new(*times.last().unwrap()),
             },
             PriceRange {
                 min: 90.0,
@@ -587,9 +587,9 @@ mod tests {
     fn a_trading_break_takes_exactly_one_bar_of_width() {
         let vp = weekend_viewport();
 
-        let friday = vp.time_to_x(9 * H1);
-        let monday = vp.time_to_x(9 * H1 + 50 * H1);
-        let step = vp.time_to_x(H1) - vp.time_to_x(0);
+        let friday = vp.time_to_x(Seconds::new(9 * H1));
+        let monday = vp.time_to_x(Seconds::new(9 * H1 + 50 * H1));
+        let step = vp.time_to_x(Seconds::new(H1)) - vp.time_to_x(Seconds::new(0));
 
         assert!(
             ((monday - friday) - step).abs() < 1e-6,
@@ -687,8 +687,8 @@ mod tests {
     fn a_time_range_can_be_set_and_read_back() {
         let mut vp = regular_viewport(100);
         vp.set_time_range(TimeRange {
-            start: 10 * H1,
-            end: 60 * H1,
+            start: Seconds::new(10 * H1),
+            end: Seconds::new(60 * H1),
         });
 
         let back = vp.time_range();
@@ -709,7 +709,7 @@ mod tests {
             "der Leerraum ändert den Zoom nicht"
         );
         // Der letzte Bar steht jetzt links vom rechten Rand.
-        let last_x = vp.time_to_x(99 * H1);
+        let last_x = vp.time_to_x(Seconds::new(99 * H1));
         assert!(last_x < vp.dimensions.width as f64);
     }
 

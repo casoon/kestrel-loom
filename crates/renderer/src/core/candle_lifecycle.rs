@@ -1,4 +1,4 @@
-use crate::core::types::Candle;
+use crate::core::types::{Candle, Seconds};
 
 /// Events from the data feed driving candle state transitions.
 pub enum CandleEvent {
@@ -9,7 +9,7 @@ pub enum CandleEvent {
     /// The running candle is closed; move it to the finalized list.
     Final(Candle),
     /// Out-of-order correction for an already-finalized candle.
-    Correction { time: i64, candle: Candle },
+    Correction { time: Seconds, candle: Candle },
     /// Reconnect backfill — merge into finalized list without creating duplicates.
     Backfill(Vec<Candle>),
 }
@@ -95,7 +95,7 @@ mod tests {
     use super::*;
 
     fn c(time: i64, price: f64) -> Candle {
-        Candle::new(time, price, price, price, price, 1.0)
+        Candle::new(Seconds::new(time), price, price, price, price, 1.0)
     }
 
     // ------------------------------------------------------------------
@@ -123,7 +123,7 @@ mod tests {
             c(20, 2.0),
         ]));
 
-        let times: Vec<i64> = store.candles().iter().map(|c| c.time).collect();
+        let times: Vec<i64> = store.candles().iter().map(|c| c.time.get()).collect();
         assert_eq!(times, vec![10, 20, 30]);
     }
 
@@ -171,7 +171,7 @@ mod tests {
         store.apply(CandleEvent::Snapshot(vec![c(50, 1.0), c(150, 2.0)]));
         store.apply(CandleEvent::Final(c(100, 3.0)));
 
-        let times: Vec<i64> = store.candles().iter().map(|c| c.time).collect();
+        let times: Vec<i64> = store.candles().iter().map(|c| c.time.get()).collect();
         assert_eq!(times, vec![50, 100, 150]);
     }
 
@@ -182,7 +182,7 @@ mod tests {
         // Finalize a candle that belongs before existing ones.
         store.apply(CandleEvent::Final(c(100, 3.0)));
 
-        let times: Vec<i64> = store.candles().iter().map(|c| c.time).collect();
+        let times: Vec<i64> = store.candles().iter().map(|c| c.time.get()).collect();
         assert_eq!(times, vec![100, 200, 300]);
     }
 
@@ -195,7 +195,7 @@ mod tests {
         let mut store = CandleStore::new();
         store.apply(CandleEvent::Snapshot(vec![c(100, 1.0), c(200, 2.0)]));
         store.apply(CandleEvent::Correction {
-            time: 100,
+            time: Seconds::new(100),
             candle: c(100, 9.0),
         });
 
@@ -208,7 +208,7 @@ mod tests {
         let mut store = CandleStore::new();
         store.apply(CandleEvent::Snapshot(vec![c(100, 1.0)]));
         store.apply(CandleEvent::Correction {
-            time: 999,
+            time: Seconds::new(999),
             candle: c(999, 9.0),
         });
 
@@ -226,7 +226,7 @@ mod tests {
         // 100 already exists; 150 is new.
         store.apply(CandleEvent::Backfill(vec![c(100, 9.0), c(150, 1.5)]));
 
-        let times: Vec<i64> = store.candles().iter().map(|c| c.time).collect();
+        let times: Vec<i64> = store.candles().iter().map(|c| c.time.get()).collect();
         assert_eq!(times, vec![100, 150, 200]);
         // Existing entry at 100 must NOT be overwritten.
         assert_eq!(store.candles()[0].c, 1.0);
@@ -241,7 +241,7 @@ mod tests {
             c(200, 2.0),
         ]));
 
-        let times: Vec<i64> = store.candles().iter().map(|c| c.time).collect();
+        let times: Vec<i64> = store.candles().iter().map(|c| c.time.get()).collect();
         assert_eq!(times, vec![100, 200, 300]);
     }
 
@@ -255,7 +255,7 @@ mod tests {
         store.apply(CandleEvent::Snapshot(vec![c(100, 1.0), c(200, 2.0)]));
         store.apply(CandleEvent::Update(c(300, 3.0)));
 
-        let all: Vec<i64> = store.all_candles().map(|c| c.time).collect();
+        let all: Vec<i64> = store.all_candles().map(|c| c.time.get()).collect();
         assert_eq!(all, vec![100, 200, 300]);
     }
 

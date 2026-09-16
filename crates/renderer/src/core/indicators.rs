@@ -11,20 +11,18 @@ use std::collections::HashMap;
 
 use kestrel_chartkit::artifact::Artifact;
 use kestrel_chartkit::indicator::registry::{build_checked, catalog};
-use kestrel_chartkit::{Bar, Indicator};
+use kestrel_chartkit::{output_unit, Bar, Indicator, IndicatorUnit};
 
+use crate::core::types::Seconds;
 use crate::core::Candle;
 
 /// Wohin ein Indikator gezeichnet wird.
 ///
-/// `kestrel-chartkit` sagt das nicht: `IndicatorCatalogEntry` trägt nur Name,
-/// Beschreibung und Standardparameter. Entscheidend ist, ob die Ausgabe in
-/// **Preiseinheiten** liegt — dann gehört sie auf den Preischart, sonst in ein
-/// eigenes Pane mit eigener Skala. Das ist eine Eigenschaft des Indikators, keine
-/// Darstellungsvorliebe, und gehört langfristig in Chartkits Katalog
-/// (siehe `plan/spezifikation/05-chartkit-vertrag.md` §4a). Bis dahin steht sie hier — explizit
-/// aufgeführt statt aus Wertebereichen geraten: ein RSI auf einem Instrument, das
-/// um 50 notiert, wäre von einer Heuristik nicht von einem Preis zu unterscheiden.
+/// Entscheidend ist, ob die Ausgabe in **Preiseinheiten** liegt — dann gehört sie
+/// auf den Preischart, sonst in ein eigenes Pane mit eigener Skala. Das ist eine
+/// Eigenschaft des Indikators, keine Darstellungsvorliebe, und deshalb sagt sie
+/// seit `kestrel-chartkit` 0.12.2 der Katalog selbst: `output_unit(name)`. Loom
+/// übersetzt nur noch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum IndicatorPlacement {
     /// Ausgabe in Preiseinheiten — auf den Preischart.
@@ -33,55 +31,6 @@ pub enum IndicatorPlacement {
     #[default]
     Pane,
 }
-
-/// Indikatoren, deren Ausgabe in Preiseinheiten liegt.
-///
-/// Unbekannte Namen gelten als [`IndicatorPlacement::Pane`]: ein falsch platziertes
-/// Overlay verzerrt die Preisskala des Hauptcharts, ein überflüssiges Pane nicht.
-///
-/// Die Liste wird nicht von Hand gepflegt und dann gehofft: der Test
-/// `the_overlay_list_matches_what_the_indicators_actually_compute` speist jeden
-/// Katalog-Indikator mit Kerzen um einen unverwechselbaren Kurs und vergleicht
-/// die gezeichneten Linien mit der Liste. Nötig wurde er, weil Chartkit zwischen
-/// 0.2.0 und 0.12.0 von 91 auf 105 Indikatoren wuchs und neun davon — `t3`,
-/// `twap`, `vidya` und Geschwister — still als Pane landeten, obwohl sie Preise
-/// rechnen.
-const PRICE_UNIT_INDICATORS: &[&str] = &[
-    "alligator",
-    "anchored_vwap",
-    "bollinger",
-    "chande_kroll",
-    "chandelier_exit",
-    "chandelier_flip_radar",
-    "dema",
-    "donchian",
-    "ema",
-    "envelope",
-    "extended_volume_profile",
-    "hma",
-    "ichimoku",
-    "kama",
-    "keltner",
-    "lsma",
-    "mcginley",
-    "midas",
-    "money_flow_profile",
-    "parabolic_sar",
-    "persistent_volume_profile",
-    "pivot_sets",
-    "sma",
-    "supertrend",
-    "t3",
-    "tema",
-    "twap",
-    "vidya",
-    "volume_profile",
-    "vwap",
-    "vwma",
-    "wma",
-    "zigzag",
-    "zigzag_advanced",
-];
 
 /// Zusatzwerte aus `IndicatorOutput::extra`, die eine eigene Linie sind.
 ///
@@ -112,11 +61,14 @@ const LINE_ORDER: &[&str] = &[
     "senkou_b",
 ];
 /// Wohin dieser Indikator gehört.
+///
+/// Nur [`IndicatorUnit::Price`] teilt die Skala der Kerzen. Jede andere Einheit —
+/// und jeder Name, den Chartkit nicht kennt — bekommt ein eigenes Pane: ein
+/// überflüssiges Pane kostet Platz, ein falsches Overlay zerstört die Preisskala.
 pub fn placement_for(name: &str) -> IndicatorPlacement {
-    if PRICE_UNIT_INDICATORS.contains(&name) {
-        IndicatorPlacement::Overlay
-    } else {
-        IndicatorPlacement::Pane
+    match output_unit(name) {
+        IndicatorUnit::Price => IndicatorPlacement::Overlay,
+        _ => IndicatorPlacement::Pane,
     }
 }
 
@@ -124,7 +76,7 @@ pub fn placement_for(name: &str) -> IndicatorPlacement {
 #[derive(Debug, Clone, Default)]
 pub struct IndicatorLine {
     pub label: &'static str,
-    pub points: Vec<(i64, f64)>,
+    pub points: Vec<(Seconds, f64)>,
 }
 
 /// Eine laufende Indikator-Instanz mit ihren bisherigen Ausgaben.
@@ -146,7 +98,7 @@ pub struct IndicatorSeries {
     /// Wie viele Kerzen bereits eingespeist wurden.
     fed: usize,
     /// Zeitstempel der zuletzt eingespeisten Kerze — erkennt Serienwechsel.
-    last_time: Option<i64>,
+    last_time: Option<Seconds>,
 }
 
 impl IndicatorSeries {
@@ -187,7 +139,7 @@ impl IndicatorSeries {
     }
 
     /// Die Hauptlinie.
-    pub fn values(&self) -> &[(i64, f64)] {
+    pub fn values(&self) -> &[(Seconds, f64)] {
         &self.lines[0].points
     }
 
@@ -234,7 +186,7 @@ impl IndicatorSeries {
 
         for candle in &candles[self.fed..] {
             let bar = Bar::new(
-                candle.time,
+                candle.time.get(),
                 candle.o,
                 candle.h,
                 candle.l,
@@ -362,7 +314,7 @@ mod tests {
                 let o = base + (i as f64 * 0.11).sin() * base * 0.03;
                 let c = o + (i as f64 * 0.37).cos() * base * 0.004;
                 Candle::new(
-                    time,
+                    Seconds::new(time),
                     o,
                     o.max(c) + base * 0.002,
                     o.min(c) - base * 0.002,
@@ -373,20 +325,25 @@ mod tests {
             .collect()
     }
 
-    /// Der Wächter über [`PRICE_UNIT_INDICATORS`].
+    /// Der Wächter über Chartkits Einheiten-Deklaration — aus Looms Sicht.
     ///
-    /// Jeder Indikator des Katalogs wird gefüttert; liegen die gezeichneten
-    /// Linien überwiegend im Kursband der Eingabe, rechnet er in Preiseinheiten
-    /// und gehört als Overlay auf den Preischart. Gemessen wird über **alle**
-    /// Linien, nicht nur `value` — Ichimoku etwa legt in `value` die Wolkenbreite
-    /// ab und die Preise in `tenkan`, `kijun`, `senkou_a`, `senkou_b`.
+    /// Chartkit prüft selbst, dass `output_unit` zu dem passt, was seine
+    /// Indikatoren rechnen. Was Chartkit nicht wissen kann: welche dieser Reihen
+    /// Loom überhaupt **zeichnet**. Genau dort entsteht der Schaden — eine als
+    /// Overlay gezeichnete Linie außerhalb des Kursbandes zerrt die Preisskala
+    /// auseinander.
+    ///
+    /// Gemessen wird deshalb über die gezeichneten Linien (siehe
+    /// [`SERIES_EXTRA_KEYS`]), nicht über alles, was `IndicatorOutput` hergibt:
+    /// liegen sie überwiegend im Kursband der Eingabe, muss der Katalog
+    /// `Price` melden.
     ///
     /// Die Schwelle liegt in einer breiten Lücke: der höchste Anteil unter den
     /// Pane-Indikatoren ist `trend_relationship` mit 0,50 (eine Preislinie neben
     /// einer Verhältniszahl), der niedrigste unter den Overlays liegt deutlich
     /// darüber.
     #[test]
-    fn the_overlay_list_matches_what_the_indicators_actually_compute() {
+    fn the_catalog_units_match_what_loom_draws() {
         const BASE: f64 = 4321.0;
         const PRICE_UNIT_THRESHOLD: f64 = 0.6;
 
@@ -417,9 +374,9 @@ mod tests {
                 .filter(|v| **v >= low * 0.5 && **v <= high * 1.5)
                 .count();
             let price_unit = inside as f64 / values.len() as f64 > PRICE_UNIT_THRESHOLD;
-            let listed = PRICE_UNIT_INDICATORS.contains(&name.as_str());
+            let declared = placement_for(&name) == IndicatorPlacement::Overlay;
 
-            match (price_unit, listed) {
+            match (price_unit, declared) {
                 (true, false) => missing.push(name),
                 (false, true) => surplus.push(name),
                 _ => {}
@@ -428,25 +385,16 @@ mod tests {
 
         assert!(
             missing.is_empty(),
-            "rechnen in Preiseinheiten, stehen aber nicht in PRICE_UNIT_INDICATORS \
-             und landen deshalb in einem eigenen Pane statt auf dem Preischart: {missing:?}"
+            "zeichnen Linien im Kursband, aber Chartkit meldet für sie keine \
+             Preiseinheit — sie landen in einem eigenen Pane statt auf dem \
+             Preischart: {missing:?}"
         );
         assert!(
             surplus.is_empty(),
-            "stehen in PRICE_UNIT_INDICATORS, rechnen aber nicht in Preiseinheiten — \
-             als Overlay verzerren sie die Preisskala: {surplus:?}"
+            "Chartkit meldet Preiseinheit, die gezeichneten Linien liegen aber \
+             außerhalb des Kursbandes — als Overlay verzerren sie die \
+             Preisskala: {surplus:?}"
         );
-    }
-
-    #[test]
-    fn every_overlay_name_exists_in_the_catalog() {
-        let known = IndicatorSeries::available();
-        for name in PRICE_UNIT_INDICATORS {
-            assert!(
-                known.iter().any(|k| k == name),
-                "{name} steht in der Overlay-Liste, aber nicht in Chartkits Katalog"
-            );
-        }
     }
 
     #[test]

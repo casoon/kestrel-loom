@@ -1,11 +1,11 @@
-use crate::core::{ChartState, Viewport};
+use crate::core::{ChartState, Seconds, Viewport};
 use crate::Candle;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct ViewportExport {
-    pub time_start: i64,
-    pub time_end: i64,
+    pub time_start: Seconds,
+    pub time_end: Seconds,
     pub price_min: f64,
     pub price_max: f64,
 }

@@ -65,7 +65,7 @@ impl ChartOverlay for NewsOverlay {
                 continue;
             }
 
-            let x = viewport.time_to_x(event.time);
+            let x = viewport.time_to_x(crate::core::types::Seconds::new(event.time));
 
             let line_color = match event.impact {
                 NewsImpact::Low => Color::rgb(100, 200, 100),

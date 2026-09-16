@@ -174,11 +174,12 @@ pub fn calculate_indicator_complexity(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::Seconds;
 
     fn create_test_candles(count: usize) -> Vec<Candle> {
         (0..count)
             .map(|i| Candle {
-                time: i as i64 * 60000, // 1 minute intervals
+                time: Seconds::new(i as i64 * 60000), // 1 minute intervals
                 o: 100.0,
                 h: 105.0,
                 l: 95.0,

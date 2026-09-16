@@ -107,9 +107,10 @@ impl Default for CandleBuffer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::Seconds;
 
     fn c(time: i64, price: f64) -> Candle {
-        Candle::new(time, price, price, price, price, 0.0)
+        Candle::new(Seconds::new(time), price, price, price, price, 0.0)
     }
 
     #[test]
@@ -143,7 +144,7 @@ mod tests {
     fn append_out_of_order_sorts() {
         let mut buf = CandleBuffer::new();
         buf.append(&[c(5, 5.0), c(1, 1.0), c(3, 3.0)]);
-        let times: Vec<i64> = buf.candles().iter().map(|c| c.time).collect();
+        let times: Vec<i64> = buf.candles().iter().map(|c| c.time.get()).collect();
         assert_eq!(times, vec![1, 3, 5]);
     }
 
@@ -166,7 +167,7 @@ mod tests {
         // Insert a new candle in the middle.
         buf.update_running(c(2, 2.0));
         assert_eq!(buf.candles().len(), 3);
-        let times: Vec<i64> = buf.candles().iter().map(|c| c.time).collect();
+        let times: Vec<i64> = buf.candles().iter().map(|c| c.time.get()).collect();
         assert_eq!(times, vec![1, 2, 3]);
     }
 
@@ -176,7 +177,7 @@ mod tests {
         buf.snapshot(vec![c(10, 10.0), c(5, 5.0), c(8, 8.0)]);
         buf.append(&[c(7, 7.0), c(5, 55.0)]); // 5 is a duplicate with new value
 
-        let times: Vec<i64> = buf.candles().iter().map(|c| c.time).collect();
+        let times: Vec<i64> = buf.candles().iter().map(|c| c.time.get()).collect();
         assert_eq!(times, vec![5, 7, 8, 10]);
         assert_eq!(buf.candles()[0].o, 55.0); // new value for ts=5
     }

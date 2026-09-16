@@ -47,10 +47,11 @@ pub fn compute_heikin_ashi(candles: &[Candle]) -> Vec<Candle> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::Seconds;
 
     fn candle(time: i64, o: f64, h: f64, l: f64, c: f64) -> Candle {
         Candle {
-            time,
+            time: Seconds::new(time),
             o,
             h,
             l,
