@@ -1,0 +1,53 @@
+---
+title: Architecture
+description: Why the core never touches a browser API, and how that makes a full frame testable.
+order: 1
+---
+
+## Three layers
+
+```
+crates/renderer/   kestrel-loom        state, viewport, scales, panes, tools,
+                                       render loop, RenderCommand model — no browser API
+crates/wasm/       kestrel-loom-wasm   wasm-bindgen façade + Canvas 2D execution
+js/                kestrel-loom.js     grouped JavaScript wrapper — what you embed
+```
+
+A render pass in the core writes `RenderCommand`s — lines, rectangles, text, candles,
+indicator lines — into a renderer. The WASM crate executes them on a
+`CanvasRenderingContext2d`; in tests, a recorder collects them instead.
+
+## Browser-free, enforced
+
+CI fails if `cargo tree -p kestrel-loom` ever contains `web-sys`, `js-sys` or `wasm-bindgen`.
+That rule is what keeps a whole frame testable without a browser.
+
+## Golden command streams
+
+The core's golden tests render deterministic scenes — fixed seed, fixed size, fixed time range —
+and compare the resulting command stream with a committed fixture in
+`crates/renderer/tests/fixtures/`:
+
+```
+full_frame_candlestick.txt
+full_frame_with_bollinger_overlay.txt
+full_frame_with_rsi_pane.txt
+tools_trend_and_level.txt
+```
+
+A change in drawing behaviour fails the test even when the result still looks plausible in a
+browser. The fixtures are rewritten only on purpose:
+
+```sh
+UPDATE_GOLDEN=1 cargo test -p kestrel-loom --test golden_render_commands
+```
+
+## The split with kestrel-chartkit
+
+| | |
+|---|---|
+| kestrel-chartkit | indicator math, scoring, artifacts, the renderer-neutral scene model |
+| kestrel-loom | viewport, scales, panes, tools, the render loop, canvas output |
+
+kestrel-chartkit knows nothing about browsers; kestrel-loom knows nothing about how an RSI is
+computed. They meet at a data contract, and kestrel-loom pins kestrel-chartkit to a release tag.

@@ -1,0 +1,5 @@
+node_modules/
+dist/
+.astro/
+# Copied by scripts/demo-assets.mjs from js/ and pkg/.
+public/demo/lib/

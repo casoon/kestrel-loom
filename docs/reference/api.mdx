@@ -1,0 +1,100 @@
+---
+title: JavaScript API
+sidebarLabel: JavaScript API
+description: The wrapper js/kestrel-loom.js groups the flat WASM façade by area. There is no docs.rs or npm page — the source is the reference.
+order: 1
+---
+
+`createChart` returns one object with the groups below. The flat façade stays reachable as
+`chart.raw`; the wrapper hides nothing, it only orders. Item-level detail lives in
+[`js/kestrel-loom.js`](https://github.com/casoon/kestrel-loom/blob/main/js/kestrel-loom.js) and
+[`crates/wasm/src/chart.rs`](https://github.com/casoon/kestrel-loom/blob/main/crates/wasm/src/chart.rs).
+
+<ApiEntry
+  kind="function"
+  lang="js"
+  name="createChart"
+  signature={`createChart(canvas, {
+  timeframe = '5m',
+  dark = true,
+  autoResize = true,   // ResizeObserver
+  autoInput = true,    // mouse, touch, keyboard
+  autoRender = true,   // draw loop, only when dirty
+}) → Promise<Chart>`}
+>
+  Loads the WebAssembly module, sizes the canvas with `devicePixelRatio`, wires input and starts
+  the render loop.
+</ApiEntry>
+
+## Groups
+
+<ApiEntry
+  kind="group"
+  lang="js"
+  name="data"
+  signature={`set(candles)  append(candles)  add(candle)  updateLast(candle)
+all()  at(x, y)  ohlcText()`}
+>
+  Candles are `{ time, o, h, l, c, v }` with `time` in Unix seconds.
+</ApiEntry>
+
+<ApiEntry
+  kind="group"
+  lang="js"
+  name="view"
+  signature={`fit()  resize()  theme(isDark)  info()  crosshair()
+logScale(on?)  priceLocked(on?)  scaleMode(mode?)  barSpacing(px?)  barWidthRatio(r)
+timezone(minutes?)  sessions(list)  showSessions(on)  rightOffset(bars?)  scrollbar(on?)
+resetPriceScale()  resetTimeScale()  timeToX(time)  xToTime(x)`}
+>
+  Getter when called without an argument, setter with one. `scaleMode` takes `price`, `log`,
+  `percent` or `indexed`.
+</ApiEntry>
+
+<ApiEntry
+  kind="group"
+  lang="js"
+  name="style"
+  signature={`set(style)  renkoBrick(size)`}
+>
+  `candlestick`, `ohlc`, `hollow`, `line`, `area`, `heikinashi`, `footprint` or
+  `renko[:brick_size]`.
+</ApiEntry>
+
+<ApiEntry
+  kind="group"
+  lang="js"
+  name="indicators"
+  signature={`available()  add(name, params?) → paneId  remove(paneId)
+height(paneId, fraction)  layout()  artifacts(on)`}
+>
+  Names and default parameters come from kestrel-chartkit's catalogue.
+</ApiEntry>
+
+<ApiEntry
+  kind="group"
+  lang="js"
+  name="tools"
+  signature={`trendLine(id, a, b)  horizontalLine(id, price)  verticalLine(id, time)
+rectangle(id, a, b)  ellipse(id, a, b)  fibonacci(id, a, b)  textLabel(id, at, text)
+remove(id)  clear()  all()  selectAt(x, y, additive?)  selectInRect(x1, y1, x2, y2, additive?)
+selected()  deleteSelected()  magnet(mode?)  snap(time, price)  undo()  redo()`}
+>
+  Anchors are `{ time, price }`.
+</ApiEntry>
+
+<ApiEntry
+  kind="group"
+  lang="js"
+  name="scene · compare · state"
+  signature={`scene.set(scene)  scene.clear()
+compare.add(symbol, candles, color)  compare.remove(symbol)  compare.all()
+state.export()  state.import(json)`}
+>
+  A scene is kestrel-chartkit's `viz::scene::Scene`. Compare symbols are drawn as normalised
+  percent performance.
+</ApiEntry>
+
+<ApiEntry kind="method" lang="js" name="destroy" signature={`destroy()`}>
+  Detaches events, stops the loop and frees the WASM object.
+</ApiEntry>

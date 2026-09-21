@@ -1,0 +1,190 @@
+---
+import { Callout, Demo } from '@casoon/pages-theme/components';
+import Base from '@casoon/pages-theme/layouts/Base.astro';
+import { url } from '@casoon/pages-theme/url';
+
+const styles = [
+  ['candlestick', 'Candlestick'],
+  ['ohlc', 'OHLC'],
+  ['hollow', 'Hollow'],
+  ['line', 'Line'],
+  ['area', 'Area'],
+  ['heikinashi', 'Heikin Ashi'],
+  ['renko:0.5', 'Renko'],
+];
+---
+
+<Base
+  title="Demo"
+  description="kestrel-loom running in this page: the WASM build and the JavaScript wrapper from the repository, drawing 300 synthetic bars onto a canvas."
+>
+  <section class="intro">
+    <h1>Zoom it, drag it, add an indicator.</h1>
+    <p>
+      This is the chart itself, not a recording: the WebAssembly package and
+      <code>js/kestrel-loom.js</code> from the repository, built for this page and loaded from
+      it. Nothing is fetched from anywhere else.
+    </p>
+    <p class="quiet">
+      The bars are synthetic — a seeded random walk of 300 five-minute candles, the same every
+      time you load the page. After every 200 bars comes a 49-hour trading pause; on this axis
+      it takes one bar of width, not a gap.
+    </p>
+  </section>
+
+  <div class="stagewrap">
+    <Demo
+      title="kestrel-loom on a canvas"
+      lead="Mouse wheel and pinch zoom, dragging and swiping pan, a double click resets. The bar at the bottom is the time scrollbar."
+      label="Interactive chart"
+    >
+      <div slot="controls" class="controls">
+        <!-- Enabled by the demo script: without JavaScript they would do nothing. -->
+        <label>
+          Chart type
+          <select id="demo-style" disabled>
+            {styles.map(([value, label]) => <option value={value}>{label}</option>)}
+          </select>
+        </label>
+        <label>
+          Indicator
+          <select id="demo-indicator" disabled>
+            <option value="">Add an indicator…</option>
+          </select>
+        </label>
+        <span class="check">
+          <input type="checkbox" id="demo-artifacts" disabled />
+          <label for="demo-artifacts">Draw indicator artifacts</label>
+        </span>
+        <button type="button" id="demo-fit" disabled>Fit to data</button>
+        <button type="button" id="demo-clear" disabled>Remove indicators</button>
+        <p class="status" id="demo-status" role="status">
+          JavaScript is off, so the chart cannot run. Everything else on this site works without
+          it.
+        </p>
+      </div>
+
+      <canvas
+        id="demo-chart"
+        role="img"
+        aria-label="Candlestick chart of 300 synthetic five-minute bars, drawn by kestrel-loom"
+      ></canvas>
+
+      <!-- is:inline keeps the script inside the stage instead of hoisting it into
+           the head: a demo's own scripts belong there. -->
+      <script is:inline type="module" src={url('demo/start.js')}></script>
+    </Demo>
+  </div>
+
+  <div class="after">
+    <Callout type="note" title="What runs here">
+      <p>
+        The page loads <code>kestrel_loom_wasm_bg.wasm</code>, built by
+        <code>./build-wasm.sh</code> from <code>crates/wasm</code> in the same workflow that
+        builds this site, and the wrapper <code>js/kestrel-loom.js</code> unchanged. The indicator
+        list is whatever the build reports through <code>chart.indicators.available()</code>. The
+        chart follows the site's light or dark theme.
+      </p>
+    </Callout>
+
+    <Callout type="caution" title="Alpha">
+      <p>
+        The API is not stable yet. Kinetic glide, two-finger pinch and the scrollbar cursor are
+        covered by tests through the façade, but have not been re-checked on real hardware.
+      </p>
+    </Callout>
+  </div>
+</Base>
+
+<style>
+  .intro,
+  .stagewrap,
+  .after {
+    max-width: var(--max);
+    margin: 0 auto;
+    padding: 0 24px;
+  }
+  .intro {
+    padding-top: 64px;
+    padding-bottom: 32px;
+    max-width: min(var(--max), 760px);
+  }
+  h1 {
+    margin: 0 0 16px;
+    color: var(--heading);
+    font-size: clamp(28px, 4vw, 40px);
+    letter-spacing: -0.02em;
+  }
+  .intro p {
+    margin: 0 0 12px;
+    font-size: 16.5px;
+  }
+  .quiet {
+    color: var(--muted);
+    font-size: 15px;
+  }
+  .after {
+    max-width: min(var(--max), 760px);
+    padding-top: 32px;
+    padding-bottom: 72px;
+  }
+
+  .controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px 14px;
+  }
+  .controls > label {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 14.5px;
+  }
+  .controls select,
+  .controls button {
+    padding: 7px 12px;
+    border: 1px solid var(--border-strong);
+    border-radius: 9px;
+    background: var(--surface);
+    color: var(--heading);
+    font: inherit;
+    font-size: 14.5px;
+  }
+  .controls select {
+    max-width: 16rem;
+  }
+  .controls button {
+    cursor: pointer;
+  }
+  .controls button:hover:not(:disabled),
+  .controls select:hover:not(:disabled) {
+    border-color: var(--accent);
+  }
+  .controls :disabled {
+    color: var(--muted);
+    cursor: not-allowed;
+  }
+  .check {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 14.5px;
+  }
+  .status {
+    flex-basis: 100%;
+    margin: 0;
+    color: var(--muted);
+    font-size: 13.5px;
+  }
+
+  canvas {
+    display: block;
+    width: 100%;
+    height: min(68vh, 560px);
+    min-height: 320px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    touch-action: none;
+  }
+</style>
