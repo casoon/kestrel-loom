@@ -230,7 +230,11 @@ fn an_overlay_has_no_pane_and_costs_no_height() {
         .iter()
         .map(|p| p["id"].as_str().unwrap().to_string())
         .collect();
-    assert_eq!(ids, ["main", "pane-rsi"], "Overlay taucht im Pane-Layout nicht auf");
+    assert_eq!(
+        ids,
+        ["main", "pane-rsi"],
+        "Overlay taucht im Pane-Layout nicht auf"
+    );
 }
 
 #[wasm_bindgen_test]
@@ -295,20 +299,20 @@ fn two_finger_pinch_zooms_in() {
     );
 }
 
-/// Ein Trackpad-Wischer endet abrupt; `tick` holt den Nachlauf nach.
+/// Ein Finger auf dem Touchscreen hat keinen System-Nachlauf; `tick` liefert ihn.
 #[wasm_bindgen_test]
-fn a_released_swipe_glides_after_the_gesture() {
+fn a_released_touch_swipe_glides_after_the_gesture() {
     let mut chart = chart_with_data(200);
 
-    for step in 0..3 {
-        chart.on_wheel(400.0, 200.0, 8.0, 0.0, false, 0, step as f64 * 16.0);
+    chart.on_touch_start(400.0, 200.0, 0.0);
+    for step in 1..=3 {
+        chart.on_touch_move(400.0 - step as f64 * 20.0, 200.0, step as f64 * 16.0);
     }
+    chart.on_touch_end(340.0, 200.0, 48.0);
     let at_rest = chart.x_to_time(400.0);
 
-    // Geste setzt aus, der Nachlauf startet und schreitet fort.
-    let _ = chart.tick(300.0);
     assert!(
-        chart.tick(316.0),
+        chart.tick(64.0),
         "der Nachlauf muss den Ausschnitt weiterziehen"
     );
     assert_ne!(
@@ -316,6 +320,21 @@ fn a_released_swipe_glides_after_the_gesture() {
         at_rest,
         "der sichtbare Ausschnitt hat sich bewegt"
     );
+}
+
+/// macOS liefert das Ausrollen eines Trackpad-Wischers selbst als Rad-Ereignisse.
+#[wasm_bindgen_test]
+fn a_trackpad_swipe_has_no_glide_of_its_own() {
+    let mut chart = chart_with_data(200);
+
+    for step in 0..3 {
+        chart.on_wheel(400.0, 200.0, 8.0, 0.0, false, 0, step as f64 * 16.0);
+    }
+    let at_rest = chart.x_to_time(400.0);
+
+    let _ = chart.tick(300.0);
+    assert!(!chart.tick(316.0));
+    assert_eq!(chart.x_to_time(400.0), at_rest);
 }
 
 #[wasm_bindgen_test]

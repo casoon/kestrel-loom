@@ -98,18 +98,30 @@ export async function createChart(canvas, options = {}) {
     on(window, 'mouseup', (e) => chart.onMouseUp(...local(e), e.button));
     on(canvas, 'mouseleave', () => chart.onMouseLeave());
     on(canvas, 'dblclick', (e) => chart.onDoubleClick(...local(e)));
+    // Das Rad gehört dem Chart nur, wenn es etwas Eindeutiges meint: Zoom
+    // (⌘/Strg oder Pinch — macOS meldet Pinch als Strg + Rad) oder waagrechtes
+    // Wischen. Alles andere ist Seitenscrollen und bleibt es. Eine begonnene Geste
+    // behält ihre Deutung, damit ein leicht schräger Wisch nicht mittendrin an
+    // die Seite fällt.
+    let wheelGestureUntil = 0;
     on(
       canvas,
       'wheel',
       (e) => {
+        const zoom = e.ctrlKey || e.metaKey;
+        const horizontal = Math.abs(e.deltaX) > Math.abs(e.deltaY) * 2;
+        const inGesture = e.timeStamp < wheelGestureUntil;
+        if (!zoom && !horizontal && !inGesture) return;
         e.preventDefault();
+        wheelGestureUntil = e.timeStamp + 200;
         // Vollständig durchreichen: erst aus deltaX, ctrlKey, deltaMode und
         // Zeitstempel zusammen lässt sich Trackpad von Mausrad unterscheiden.
+        // ⌘ zählt für den Kern wie Strg: Zoom.
         chart.onWheel(
           ...local(e),
           e.deltaX,
           e.deltaY,
-          e.ctrlKey,
+          zoom,
           e.deltaMode,
           e.timeStamp,
         );
@@ -151,7 +163,18 @@ export async function createChart(canvas, options = {}) {
       const touch = e.changedTouches[0];
       if (touch) chart.onTouchEnd(...local(touch), e.timeStamp);
     });
-    on(window, 'keydown', (e) => chart.onKeyDown(e.key));
+    // Tasten gelten nur, solange der Chart den Fokus hat. Am Fenster hängend
+    // verschoben die Pfeiltasten den Chart auch beim Tippen in einem Eingabefeld.
+    if (!canvas.hasAttribute('tabindex')) canvas.tabIndex = 0;
+    canvas.style.outline = 'none';
+    const chartKeys = new Set([
+      'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', '+', '=', '-', '_', 'Home', 'h',
+    ]);
+    on(canvas, 'keydown', (e) => {
+      if (e.metaKey || e.ctrlKey || e.altKey || !chartKeys.has(e.key)) return;
+      e.preventDefault();
+      chart.onKeyDown(e.key);
+    });
   }
 
   let observer = null;

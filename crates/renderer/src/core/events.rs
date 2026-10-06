@@ -64,11 +64,10 @@ pub enum KeyboardEvent {
     KeyUp { key: String },
 }
 
-/// Nachlauf einer Wischgeste: Geschwindigkeit in Pixel je Millisekunde.
+/// Nachlauf einer Touch-Wischgeste: Geschwindigkeit in Pixel je Millisekunde.
 ///
-/// Ein Trackpad-Wischer endet abrupt, weil der Browser keinen Nachlauf liefert;
-/// die Magic Mouse schickt ihren selbst. Ohne diesen Nachlauf wirkt ein
-/// Trackpad-Schwung wie ein Festhalten und Loslassen.
+/// Ein Finger auf dem Touchscreen hat keinen System-Nachlauf. Auf dem Rad gibt es
+/// keinen eigenen: macOS liefert das Ausrollen als weitere Rad-Ereignisse selbst.
 #[derive(Debug, Clone, Copy)]
 struct Momentum {
     vx: f64,
@@ -86,9 +85,6 @@ const MOMENTUM_DECAY_MS: f64 = 220.0;
 /// Ein einzelner Frame rechnet höchstens so weit — sonst springt der Chart,
 /// wenn der Tab im Hintergrund war und `tick` lange nicht lief.
 const MOMENTUM_MAX_FRAME_MS: f64 = 64.0;
-/// Solange zusammenhängende Rad-Ereignisse dichter liegen, ist die Wischgeste
-/// nicht zu Ende. Muss zu `wheel::LATCH_MS` passen.
-const MOMENTUM_LATCH_MS: f64 = 200.0;
 
 /// Event handler for chart interactions
 pub struct EventHandler {
@@ -104,11 +100,11 @@ pub struct EventHandler {
     wheel: WheelInterpreter,
     /// Laufender Nachlauf nach dem Loslassen.
     momentum: Option<Momentum>,
-    /// Letzter Zeitstempel und Geschwindigkeit eines Trackpad-Pans — wird zum
-    /// Nachlauf, sobald die Geste aussetzt.
-    wheel_pan_ts: f64,
-    wheel_pan_vx: f64,
-    wheel_pan_vy: f64,
+    /// Bruchteile von Pixeln, die ein Verschieben noch schuldet. Trackpads und
+    /// Nachlauf melden Bruchteile; ohne Übertrag gingen sie bei jedem Ereignis
+    /// verloren und die Bewegung würde stufig.
+    pan_rest_x: f64,
+    pan_rest_y: f64,
     /// Letzter Zeitstempel eines Ein-Finger-Zugs (Touch).
     last_touch_ts: f64,
     touch_vx: f64,
@@ -125,9 +121,8 @@ impl EventHandler {
             double_click_threshold: 300.0,
             wheel: WheelInterpreter::new(),
             momentum: None,
-            wheel_pan_ts: f64::NEG_INFINITY,
-            wheel_pan_vx: 0.0,
-            wheel_pan_vy: 0.0,
+            pan_rest_x: 0.0,
+            pan_rest_y: 0.0,
             last_touch_ts: 0.0,
             touch_vx: 0.0,
             touch_vy: 0.0,
@@ -141,8 +136,6 @@ impl EventHandler {
     /// bewegt — die Zeichenschleife zeichnet dann weiter. Ohne Aufruf gibt es
     /// keinen Nachlauf, statt dass der Kern selbst eine Uhr befragt (A4).
     pub fn tick(&mut self, now_ms: f64, state: &mut ChartState) -> bool {
-        self.start_wheel_momentum(now_ms);
-
         let Some(momentum) = self.momentum.as_mut() else {
             return false;
         };
@@ -163,39 +156,29 @@ impl EventHandler {
             self.momentum = None;
         }
 
-        let (dx, dy) = (dx.round() as i32, dy.round() as i32);
-        if dx == 0 && dy == 0 {
+        if !self.pan_by(dx, dy, state) {
             return self.momentum.is_some();
         }
-        state.pan(dx, dy);
         true
     }
 
-    /// Ein ausgesetzter Trackpad-Pan wird zum Nachlauf.
-    fn start_wheel_momentum(&mut self, now_ms: f64) {
-        if self.momentum.is_some() {
-            return;
+    /// Verschiebt um Bruchteile von Pixeln; was unter einem Pixel bleibt, wird
+    /// beim nächsten Aufruf mitgerechnet. Gibt `true`, wenn sich etwas bewegt hat.
+    fn pan_by(&mut self, dx: f64, dy: f64, state: &mut ChartState) -> bool {
+        self.pan_rest_x += dx;
+        self.pan_rest_y += dy;
+        let (whole_x, whole_y) = (self.pan_rest_x.trunc(), self.pan_rest_y.trunc());
+        self.pan_rest_x -= whole_x;
+        self.pan_rest_y -= whole_y;
+        if whole_x == 0.0 && whole_y == 0.0 {
+            return false;
         }
-        if now_ms - self.wheel_pan_ts <= MOMENTUM_LATCH_MS {
-            return;
-        }
-        let speed = self.wheel_pan_vx.hypot(self.wheel_pan_vy);
-        if speed >= MOMENTUM_MIN_SPEED {
-            self.momentum = Some(Momentum {
-                vx: self.wheel_pan_vx,
-                vy: self.wheel_pan_vy,
-                last_ts: now_ms,
-            });
-        }
-        // Einmalig: der Kandidat darf nicht erneut zünden.
-        self.wheel_pan_ts = f64::NEG_INFINITY;
-        self.wheel_pan_vx = 0.0;
-        self.wheel_pan_vy = 0.0;
+        state.pan(whole_x as i32, whole_y as i32);
+        true
     }
 
     fn stop_momentum(&mut self) {
         self.momentum = None;
-        self.wheel_pan_ts = f64::NEG_INFINITY;
         self.touch_vx = 0.0;
         self.touch_vy = 0.0;
     }
@@ -326,11 +309,11 @@ impl EventHandler {
 
         if self.is_dragging {
             // Calculate delta from last position
-            let delta_x = (x - self.last_drag_x) as i32;
-            let delta_y = (y - self.last_drag_y) as i32;
+            let delta_x = x - self.last_drag_x;
+            let delta_y = y - self.last_drag_y;
 
             // Pan the chart
-            state.pan(delta_x, delta_y);
+            self.pan_by(delta_x, delta_y, state);
 
             // Update last position
             self.last_drag_x = x;
@@ -351,23 +334,15 @@ impl EventHandler {
                 self.stop_momentum();
                 state.zoom(factor, Some(center_x.max(0.0) as u32));
             }
-            WheelGesture::Pan { delta_x, delta_y } => {
-                // Ein neues Verschieben übernimmt wieder die Führung.
+            WheelGesture::Pan { delta_x, .. } => {
+                // Nur die Zeitachse: Preis verschiebt man durch Ziehen oder an der
+                // Preisachse. Ein Wisch nach oben oder unten hat auf dem Trackpad
+                // nie die Absicht, den Preisbereich zu verschieben — und sperrte
+                // ihn dabei (`price_locked`). Einen eigenen Nachlauf gibt es nicht:
+                // macOS liefert das Ausrollen als weitere Rad-Ereignisse selbst.
                 self.momentum = None;
-                let dt = input.timestamp_ms - self.wheel_pan_ts;
-                if (0.0..MOMENTUM_LATCH_MS).contains(&dt) {
-                    // Rad-Deltas zeigen in die Gegenrichtung des Ziehens.
-                    self.wheel_pan_vx = -delta_x / dt;
-                    self.wheel_pan_vy = -delta_y / dt;
-                } else {
-                    self.wheel_pan_vx = 0.0;
-                    self.wheel_pan_vy = 0.0;
-                }
-                self.wheel_pan_ts = input.timestamp_ms;
-
-                // Rad-Deltas zeigen in die Gegenrichtung des Ziehens: nach unten
-                // scrollen schiebt den Inhalt nach oben.
-                state.pan(-delta_x as i32, -delta_y as i32);
+                // Rad-Deltas zeigen in die Gegenrichtung des Ziehens.
+                self.pan_by(-delta_x, 0.0, state);
             }
         }
     }
@@ -397,16 +372,16 @@ impl EventHandler {
             }
             TouchEvent::Move { x, y, timestamp_ms } => {
                 if self.is_dragging {
-                    let delta_x = (x - self.last_drag_x) as i32;
-                    let delta_y = (y - self.last_drag_y) as i32;
+                    let delta_x = x - self.last_drag_x;
+                    let delta_y = y - self.last_drag_y;
 
                     let dt = timestamp_ms - self.last_touch_ts;
                     if dt > 0.0 {
-                        self.touch_vx = delta_x as f64 / dt;
-                        self.touch_vy = delta_y as f64 / dt;
+                        self.touch_vx = delta_x / dt;
+                        self.touch_vy = delta_y / dt;
                     }
 
-                    state.pan(delta_x, delta_y);
+                    self.pan_by(delta_x, delta_y, state);
 
                     self.last_drag_x = x;
                     self.last_drag_y = y;
@@ -614,22 +589,19 @@ mod tests {
         assert!(after < before, "hochscrollen muss hineinzoomen");
     }
 
+    /// Ein Wisch nach oben oder unten hat auf dem Trackpad nie die Absicht, den
+    /// Preisbereich zu verschieben — und sperrte ihn dabei. Preis verschiebt man
+    /// durch Ziehen oder an der Preisachse.
     #[test]
-    fn a_vertical_swipe_moves_the_price_range() {
+    fn a_vertical_swipe_leaves_the_price_range_alone() {
         let mut handler = EventHandler::new();
         let mut state = fitted_state();
 
-        let min_before = state.viewport.price.min;
+        let price_before = state.viewport.price;
         handler.handle_mouse_event(wheel(0.0, 8.0, 0.0), &mut state);
 
-        assert!(
-            state.viewport.price.min < min_before,
-            "nach unten scrollen muss niedrigere Preise ins Bild holen"
-        );
-        assert!(
-            state.viewport.price_locked,
-            "sonst zieht die nächste Kerze den Ausschnitt sofort zurück"
-        );
+        assert_eq!(state.viewport.price, price_before);
+        assert!(!state.viewport.price_locked);
     }
 
     #[test]
@@ -637,11 +609,38 @@ mod tests {
         let mut handler = EventHandler::new();
         let mut state = fitted_state();
 
-        handler.handle_mouse_event(wheel(0.0, 8.0, 0.0), &mut state);
+        // Ziehen nach unten verschiebt auch den Preis und sperrt ihn.
+        handler.handle_mouse_event(
+            MouseEvent::Down {
+                x: 100.0,
+                y: 100.0,
+                button: MouseButton::Left,
+            },
+            &mut state,
+        );
+        handler.handle_mouse_event(MouseEvent::Move { x: 100.0, y: 140.0 }, &mut state);
         assert!(state.viewport.price_locked);
 
         handler.handle_mouse_event(MouseEvent::DoubleClick { x: 1.0, y: 1.0 }, &mut state);
         assert!(!state.viewport.price_locked);
+    }
+
+    /// Trackpads melden Bruchteile von Pixeln. Wären sie abgeschnitten, bewegte
+    /// sich ein langsamer Wisch gar nicht.
+    #[test]
+    fn sub_pixel_swipe_deltas_are_not_lost() {
+        let mut handler = EventHandler::new();
+        let mut state = fitted_state();
+        let start_before = state.viewport.time_start();
+
+        for step in 0..50 {
+            handler.handle_mouse_event(wheel(0.4, 0.0, step as f64 * 16.0), &mut state);
+        }
+
+        assert!(
+            state.viewport.time_start() > start_before,
+            "20 px in Summe müssen ankommen"
+        );
     }
 
     // --- Trägheit ---
@@ -653,37 +652,63 @@ mod tests {
         assert!(!handler.tick(1_000.0, &mut state));
     }
 
-    /// Ein Trackpad-Wischer endet abrupt, weil der Browser keinen Nachlauf
-    /// liefert. Der Kern holt ihn nach, sobald die Geste aussetzt.
+    /// macOS liefert das Ausrollen eines Wischers selbst als weitere Rad-Ereignisse.
+    /// Ein zweiter, eigener Nachlauf obendrauf ließ den Chart doppelt gleiten.
     #[test]
-    fn a_released_swipe_glides_on_and_decays() {
+    fn a_wheel_swipe_has_no_glide_of_its_own() {
         let mut handler = EventHandler::new();
         let mut state = fitted_state();
 
-        // Drei Verschiebe-Ereignisse, dicht beieinander.
         for step in 0..3 {
             handler.handle_mouse_event(wheel(8.0, 0.0, step as f64 * 16.0), &mut state);
         }
         let at_rest = state.viewport.bars();
 
-        // Geste ist ausgesetzt: der Nachlauf startet und bewegt weiter.
-        assert!(
-            !handler.tick(300.0, &mut state),
-            "Startframe bewegt noch nicht"
-        );
-        assert!(
-            handler.tick(316.0, &mut state),
-            "der Nachlauf muss den Ausschnitt weiterziehen"
-        );
-        assert!(
-            state.viewport.bars() != at_rest,
-            "der Ausschnitt hat sich bewegt"
-        );
+        assert!(!handler.tick(300.0, &mut state));
+        assert!(!handler.tick(316.0, &mut state));
+        assert_eq!(state.viewport.bars(), at_rest);
+    }
 
-        // Und er endet von selbst.
+    /// Ein Finger auf dem Touchscreen hat keinen System-Nachlauf; den liefert der Kern.
+    #[test]
+    fn a_released_touch_swipe_glides_on_and_decays() {
+        let mut handler = EventHandler::new();
+        let mut state = fitted_state();
+
+        handler.handle_touch_event(
+            TouchEvent::Start {
+                x: 400.0,
+                y: 300.0,
+                timestamp_ms: 0.0,
+            },
+            &mut state,
+        );
+        for step in 1..=3 {
+            handler.handle_touch_event(
+                TouchEvent::Move {
+                    x: 400.0 - step as f64 * 20.0,
+                    y: 300.0,
+                    timestamp_ms: step as f64 * 16.0,
+                },
+                &mut state,
+            );
+        }
+        handler.handle_touch_event(
+            TouchEvent::End {
+                x: 340.0,
+                y: 300.0,
+                timestamp_ms: 48.0,
+            },
+            &mut state,
+        );
+        let at_rest = state.viewport.bars();
+
+        assert!(handler.tick(64.0, &mut state), "der Nachlauf zieht weiter");
+        assert!(state.viewport.bars() != at_rest);
+
         let mut stopped = false;
         for step in 1..400 {
-            if !handler.tick(316.0 + step as f64 * 16.0, &mut state) {
+            if !handler.tick(64.0 + step as f64 * 16.0, &mut state) {
                 stopped = true;
                 break;
             }
@@ -706,10 +731,33 @@ mod tests {
     fn a_pressed_mouse_stops_the_momentum() {
         let mut handler = EventHandler::new();
         let mut state = fitted_state();
-        for step in 0..3 {
-            handler.handle_mouse_event(wheel(8.0, 0.0, step as f64 * 16.0), &mut state);
+        handler.handle_touch_event(
+            TouchEvent::Start {
+                x: 400.0,
+                y: 300.0,
+                timestamp_ms: 0.0,
+            },
+            &mut state,
+        );
+        for step in 1..=3 {
+            handler.handle_touch_event(
+                TouchEvent::Move {
+                    x: 400.0 - step as f64 * 20.0,
+                    y: 300.0,
+                    timestamp_ms: step as f64 * 16.0,
+                },
+                &mut state,
+            );
         }
-        assert!(!handler.tick(300.0, &mut state));
+        handler.handle_touch_event(
+            TouchEvent::End {
+                x: 340.0,
+                y: 300.0,
+                timestamp_ms: 48.0,
+            },
+            &mut state,
+        );
+        assert!(handler.tick(64.0, &mut state), "der Nachlauf läuft");
 
         handler.handle_mouse_event(
             MouseEvent::Down {
@@ -720,7 +768,7 @@ mod tests {
             &mut state,
         );
         assert!(
-            !handler.tick(316.0, &mut state),
+            !handler.tick(80.0, &mut state),
             "der Nachlauf ist abgebrochen"
         );
     }

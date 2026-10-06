@@ -165,6 +165,58 @@ impl ChartState {
         self.mark_dirty();
     }
 
+    /// Ersetzt den Kerzensatz bei laufendem Betrieb, ohne den Ausschnitt anzufassen.
+    ///
+    /// `set_candles` passt Zeit- und Preisbereich auf den ganzen Satz an — bei jedem
+    /// Tick. Wer gezoomt oder verschoben hat, verlöre seinen Ausschnitt. Hier bleibt
+    /// er stehen; nur wer den neuesten Bar im Blick hatte, dessen Ausschnitt läuft
+    /// mit den neuen Bars mit. Der Preisbereich wächst nur, wenn eine neue Kerze
+    /// ihn sprengt, und nur solange er nicht gesperrt ist.
+    pub fn replace_candles_keep_view(&mut self, candles: Vec<Candle>) {
+        if self.candles.is_empty() || candles.is_empty() {
+            self.set_candles(candles);
+            return;
+        }
+        let old_count = self.viewport.bar_count() as f64;
+        let bars = self.viewport.bars();
+        // Der neueste Bar liegt im Bild (oder rechts davon im Leerraum).
+        let following = bars.last >= old_count - 1.0;
+
+        self.candles = candles;
+        self.viewport.sync_bars(&self.candles);
+
+        let new_count = self.viewport.bar_count() as f64;
+        if following && new_count != old_count {
+            let shift = new_count - old_count;
+            self.viewport
+                .set_bars(bars.first + shift, bars.last + shift);
+        } else {
+            self.viewport.set_bars(bars.first, bars.last);
+        }
+
+        if !self.viewport.price_locked {
+            let first = self.viewport.bars().first.max(0.0).floor() as usize;
+            let last = self.viewport.bars().last.max(0.0).ceil() as usize;
+            let visible = self
+                .candles
+                .iter()
+                .skip(first)
+                .take(last.saturating_sub(first) + 1);
+            let (mut low, mut high) = (f64::MAX, f64::MIN);
+            for candle in visible {
+                low = low.min(candle.l);
+                high = high.max(candle.h);
+            }
+            if low <= high {
+                let padding = (high - low) * 0.05;
+                let price = &mut self.viewport.price;
+                price.min = price.min.min(low - padding);
+                price.max = price.max.max(high + padding);
+            }
+        }
+        self.mark_dirty();
+    }
+
     /// Add a single candle (for real-time updates)
     pub fn add_candle(&mut self, candle: Candle) {
         let time = candle.time;
@@ -522,5 +574,83 @@ mod dimension_tests {
 
         assert_eq!(s.viewport.dimensions.pixel_ratio, 3.0);
         assert!(s.is_dirty());
+    }
+}
+
+#[cfg(test)]
+mod live_update_tests {
+    use super::*;
+    use crate::core::Seconds;
+
+    fn candles(count: i64) -> Vec<Candle> {
+        (0..count)
+            .map(|i| {
+                Candle::new(
+                    Seconds::new(1_600_000_000 + i * 300),
+                    100.0,
+                    105.0,
+                    95.0,
+                    102.0,
+                    1.0,
+                )
+            })
+            .collect()
+    }
+
+    fn state_with(count: i64) -> ChartState {
+        let mut state = ChartState::new(800, 400, Timeframe::M5);
+        state.set_candles(candles(count));
+        state
+    }
+
+    #[test]
+    fn a_zoomed_in_view_survives_a_live_update() {
+        let mut state = state_with(200);
+        state.viewport.set_bars(40.0, 80.0);
+        let bars = state.viewport.bars();
+
+        state.replace_candles_keep_view(candles(201));
+
+        assert_eq!(
+            state.viewport.bars(),
+            bars,
+            "wer zurückgescrollt hat, behält den Ausschnitt"
+        );
+    }
+
+    #[test]
+    fn a_view_at_the_latest_bar_follows_new_bars() {
+        let mut state = state_with(200);
+        let span = state.viewport.bars().span();
+        let right_gap = state.viewport.right_offset();
+
+        state.replace_candles_keep_view(candles(201));
+
+        assert_eq!(state.viewport.bars().span(), span);
+        assert!((state.viewport.right_offset() - right_gap).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_locked_price_range_is_left_alone() {
+        let mut state = state_with(200);
+        state.viewport.price_locked = true;
+        let price = state.viewport.price;
+        let mut next = candles(201);
+        next.last_mut().unwrap().h = 500.0;
+
+        state.replace_candles_keep_view(next);
+
+        assert_eq!(state.viewport.price, price);
+    }
+
+    #[test]
+    fn a_new_high_widens_an_unlocked_price_range() {
+        let mut state = state_with(200);
+        let mut next = candles(201);
+        next.last_mut().unwrap().h = 500.0;
+
+        state.replace_candles_keep_view(next);
+
+        assert!(state.viewport.price.max >= 500.0);
     }
 }

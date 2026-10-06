@@ -126,7 +126,7 @@ impl WasmChart {
         let mut buf = CandleBuffer::new();
         buf.snapshot(self.state.candles().to_vec());
         buf.append(&incoming);
-        self.state.set_candles(buf.candles().to_vec());
+        self.state.replace_candles_keep_view(buf.candles().to_vec());
         Ok(())
     }
 
@@ -145,7 +145,7 @@ impl WasmChart {
         let mut buf = CandleBuffer::new();
         buf.snapshot(self.state.candles().to_vec());
         buf.update_running(candle);
-        self.state.set_candles(buf.candles().to_vec());
+        self.state.replace_candles_keep_view(buf.candles().to_vec());
         Ok(())
     }
 
