@@ -22,6 +22,11 @@ pub struct Canvas2DRenderer {
     /// Zuletzt gesetzte Schrift; `set_font` je Textaufruf wäre je Frame ein
     /// Dutzend unnötiger Übergänge.
     last_font: String,
+    /// Zuletzt gesetzte Füll- und Strichfarbe. Jeder Wechsel kostet einen Farbtext
+    /// und einen Übergang nach JavaScript; gleiche Farben hintereinander (alle Kerzen
+    /// einer Richtung, Gitterlinien) sparen beides.
+    last_fill: Option<Color>,
+    last_stroke: Option<Color>,
 }
 
 /// Schrift für alle Beschriftungen. Inter, wo vorhanden; sonst die Systemschrift.
@@ -59,6 +64,8 @@ impl Canvas2DRenderer {
             media_space,
             background: Color::rgba(0, 0, 0, 1.0),
             last_font: String::new(),
+            last_fill: None,
+            last_stroke: None,
         })
     }
 
@@ -95,6 +102,9 @@ impl Canvas2DRenderer {
 
         // DON'T set CSS style here - that triggers ResizeObserver loop!
         // The CSS size is already set by the container element
+
+        // Das Setzen der Canvas-Größe setzt den ganzen Zeichenzustand zurück.
+        self.forget_style();
 
         // Reset transform and scale context for pixel ratio
         self.ctx.reset_transform()?;
@@ -240,9 +250,21 @@ impl Canvas2DRenderer {
         }
     }
 
-    fn set_fill_color(&self, color: Color) {
+    fn set_fill_color(&mut self, color: Color) {
+        if self.last_fill == Some(color) {
+            return;
+        }
         let color_str = format!("rgba({}, {}, {}, {})", color.r, color.g, color.b, color.a);
         self.ctx.set_fill_style_str(&color_str);
+        self.last_fill = Some(color);
+    }
+
+    /// Vergisst, was zuletzt am Kontext gesetzt wurde — nach `restore` und nach einer
+    /// Größenänderung stimmt der Zwischenspeicher sonst nicht mehr mit dem Kontext überein.
+    fn forget_style(&mut self) {
+        self.last_fill = None;
+        self.last_stroke = None;
+        self.last_font.clear();
     }
 
     fn apply_font(&mut self, size: f32) {
@@ -253,9 +275,13 @@ impl Canvas2DRenderer {
         }
     }
 
-    fn set_stroke_color(&self, color: Color) {
+    fn set_stroke_color(&mut self, color: Color) {
+        if self.last_stroke == Some(color) {
+            return;
+        }
         let color_str = format!("rgba({}, {}, {}, {})", color.r, color.g, color.b, color.a);
         self.ctx.set_stroke_style_str(&color_str);
+        self.last_stroke = Some(color);
     }
 
     /// Eine waagrechte Linie, deren Kanten auf Gerätepixeln liegen.
@@ -727,7 +753,9 @@ impl Renderer for Canvas2DRenderer {
     }
 
     fn clear_clip(&mut self) {
+        // `restore` setzt Farben und Schrift auf den Stand vor `save` zurück.
         self.ctx.restore();
+        self.forget_style();
     }
 
     fn dimensions(&self) -> (u32, u32) {
