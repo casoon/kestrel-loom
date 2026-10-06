@@ -105,6 +105,11 @@ pub struct Viewport {
     /// bleibt der Datenbereich so breit wie die Zeichenfläche (Standard, solange
     /// der Aufrufer keine Achse zeichnet).
     pub axis_inset: f64,
+    /// Höhe, die Indikator-Panes unten beanspruchen. Die Preisskala gilt nur für
+    /// den Rest ([`Viewport::price_height`]); `render_chart` setzt den Wert je Frame.
+    /// Ohne ihn rechneten Fadenkreuz und Zeichenwerkzeuge mit der vollen Höhe und
+    /// läsen bei jedem Pane einen anderen Preis ab, als die Kerzen zeigen.
+    pub pane_inset: f64,
 }
 
 impl Viewport {
@@ -135,7 +140,13 @@ impl Viewport {
             scale_mode: ViewportScaleMode::Price,
             scale_base_price: 0.0,
             axis_inset: 0.0,
+            pane_inset: 0.0,
         }
+    }
+
+    /// Höhe des Preisbereichs: die Zeichenhöhe ohne Indikator-Panes.
+    pub fn price_height(&self) -> f64 {
+        (self.dimensions.height as f64 - self.pane_inset).max(1.0)
     }
 
     /// Breite des Datenbereichs: die Zeichenfläche ohne Preisachse.
@@ -285,7 +296,7 @@ impl Viewport {
     /// Im Log-Modus wird im Logarithmus verschoben, sonst würde derselbe
     /// Pixelweg unten anders wirken als oben.
     pub fn pan_price(&mut self, delta_y: f64) {
-        let h = self.dimensions.height as f64;
+        let h = self.price_height();
         if h <= 0.0 {
             return;
         }
@@ -355,7 +366,7 @@ impl Viewport {
 
     /// Convert price to y pixel coordinate
     pub fn price_to_y(&self, price: f64) -> f64 {
-        let h = self.dimensions.height as f64;
+        let h = self.price_height();
         if self.log_scale {
             let log_min = self.price.min.max(1e-10).ln();
             let log_max = self.price.max.max(1e-10).ln();
@@ -369,7 +380,7 @@ impl Viewport {
 
     /// Convert y pixel to price
     pub fn y_to_price(&self, y: f64) -> f64 {
-        let h = self.dimensions.height as f64;
+        let h = self.price_height();
         if self.log_scale {
             let log_min = self.price.min.max(1e-10).ln();
             let log_max = self.price.max.max(1e-10).ln();
@@ -443,7 +454,7 @@ impl Viewport {
     /// Returns the inverted Y coordinate for tracking
     pub fn start_price_scale(&self, y: f64) -> f64 {
         // Invert Y (0 is top, height is bottom)
-        self.dimensions.height as f64 - y
+        self.price_height() - y
     }
 
     /// Apply price scaling based on Y movement
@@ -457,13 +468,13 @@ impl Viewport {
         initial_price_range: &PriceRange,
     ) {
         // Invert current Y
-        let y = self.dimensions.height as f64 - current_y;
+        let y = self.price_height() - current_y;
 
         // Clamp to valid range
         let y = y.max(0.0);
 
         // Calculate scale coefficient with 20% padding (like lightweight-charts)
-        let height = self.dimensions.height as f64;
+        let height = self.price_height();
         let padding_factor = 0.2;
 
         let scale_coeff =

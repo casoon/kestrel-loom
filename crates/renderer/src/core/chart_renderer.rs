@@ -213,12 +213,12 @@ pub fn render_chart(state: &mut ChartState, extras: &RenderExtras, renderer: &mu
     renderer.clear(bg_color);
 
     // ── Compute main chart height once (shared by all rendering passes) ──
-    // main_height excludes indicator pane area at the bottom.
-    // We shrink the viewport height to main_height so that price_to_y and
-    // all grid/candle Y calculations map correctly to the main chart area.
-    let full_height = state.viewport.dimensions.height;
-    let main_height = main_chart_height(indicator_panes, full_height as f64);
-    state.viewport.dimensions.height = main_height as u32;
+    // main_height schließt die Indikator-Panes unten aus. Der Viewport führt sie als
+    // `pane_inset`; `price_to_y`/`y_to_price` und alle Abbildungen darüber — Kerzen,
+    // Szenen, Werkzeuge, Fadenkreuz — rechnen damit stets auf dem Hauptbereich.
+    let full_height = f64::from(state.viewport.dimensions.height);
+    let main_height = main_chart_height(indicator_panes, full_height);
+    state.viewport.pane_inset = full_height - main_height;
 
     // Draw grid
     if state.options.show_grid {
@@ -250,7 +250,7 @@ pub fn render_chart(state: &mut ChartState, extras: &RenderExtras, renderer: &mu
             AXIS_LABEL_WIDTH_PX,
         ) {
             let x = vp.time_to_x(tick.time);
-            renderer.draw_line(x, 0.0, x, vp.dimensions.height as f64, grid_color, 1.0);
+            renderer.draw_line(x, 0.0, x, vp.price_height(), grid_color, 1.0);
         }
     }
 
@@ -338,7 +338,7 @@ pub fn render_chart(state: &mut ChartState, extras: &RenderExtras, renderer: &mu
                         b: line_color.b,
                         a: 0.15,
                     };
-                    let baseline_y = vp.dimensions.height as f64;
+                    let baseline_y = vp.price_height();
                     renderer.draw_area(&points, baseline_y, fill, line_color, 2.0);
                 } else {
                     renderer.draw_polyline(&points, line_color, 2.0);
@@ -454,7 +454,7 @@ pub fn render_chart(state: &mut ChartState, extras: &RenderExtras, renderer: &mu
         // Only show session markers for timeframes <= 1h (3600s)
         if tf_secs <= 3600 {
             let chart_width = vp.plot_width();
-            let chart_height = vp.dimensions.height as f64;
+            let chart_height = vp.price_height();
             let visible_time = vp.time_range();
             let time_start = visible_time.start.get();
             let time_end = visible_time.end.get();
@@ -541,8 +541,6 @@ pub fn render_chart(state: &mut ChartState, extras: &RenderExtras, renderer: &mu
     render_selected_tool_highlights(state, renderer);
     renderer.clear_clip();
 
-    // Volle Zeichenhöhe für Panes, Achsen und Fadenkreuz.
-    state.viewport.dimensions.height = full_height;
     render_indicator_panes(indicator_panes, state, renderer);
 
     // Draw crosshair with pixel-perfect rendering
@@ -826,7 +824,7 @@ fn render_footprint_candles(
         return;
     }
 
-    let price_per_pixel = ((vp.price.max - vp.price.min) / vp.dimensions.height as f64)
+    let price_per_pixel = ((vp.price.max - vp.price.min) / vp.price_height())
         .abs()
         .max(0.0000001);
     let bid_color = crate::primitives::Color::rgba(248, 81, 73, 0.72);

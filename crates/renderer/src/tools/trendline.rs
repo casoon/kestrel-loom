@@ -132,7 +132,7 @@ impl ChartTool for TrendLine {
                 );
             } else {
                 // Vertical line
-                let height = viewport.dimensions.height as f64;
+                let height = viewport.price_height();
                 renderer.draw_vertical_line(x1, 0.0, height, &self.color, self.width);
             }
         } else {

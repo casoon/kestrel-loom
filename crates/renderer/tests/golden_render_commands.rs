@@ -957,3 +957,58 @@ fn zones_sit_behind_the_candles_and_labels_in_front() {
     assert!(zone < first_body, "die Zone liegt hinter den Kerzen");
     assert!(label > last_body, "die Beschriftung liegt vor den Kerzen");
 }
+
+/// Das Fadenkreuz liest den Preis, den die Kerzen an dieser Stelle zeigen — auch dann,
+/// wenn Indikator-Panes den Hauptbereich verkleinern. Bis 2026-10-06 rechnete es mit der
+/// vollen Zeichenhöhe und las neben den Kerzen ab.
+#[test]
+fn the_crosshair_price_matches_the_candles_when_a_pane_is_present() {
+    let mut state = fitted(100);
+    let mut panes = vec![IndicatorPane::new("rsi", "rsi", HashMap::new(), 0.28).unwrap()];
+    update_indicator_panes(&mut panes, state.candles());
+    let extras = RenderExtras {
+        indicator_panes: &panes,
+        ..Default::default()
+    };
+    let commands = frame(&mut state, &extras);
+
+    let close = state.candles()[50].c;
+    let y = state.viewport.price_to_y(close);
+    assert!(
+        state.viewport.pane_inset > 0.0 && y < 400.0 - state.viewport.pane_inset,
+        "die Kerze liegt im Hauptbereich"
+    );
+    assert!((state.viewport.y_to_price(y) - close).abs() < 1e-9);
+
+    // Die Skala **nach** dem Frame ist die, mit der der Frame gezeichnet hat: der Körper
+    // der 51. Kerze hat den Schlusskurs als Ober- oder Unterkante.
+    let x = state.viewport.time_to_x(state.candles()[50].time);
+    let on_edge = commands.iter().any(|c| match c {
+        RenderCommand::Rect {
+            x: rx,
+            y: ry,
+            width,
+            height,
+            ..
+        } if *width < 20.0 && (rx - x).abs() < 1.0 => {
+            (ry - y).abs() < 1e-6 || (ry + height - y).abs() < 1e-6
+        }
+        _ => false,
+    });
+    assert!(
+        on_edge,
+        "die gezeichnete Kerze liegt auf der Skala des Viewports"
+    );
+
+    // Und das Fadenkreuz selbst: Zeiger auf der Höhe des Schlusskurses → derselbe Preis.
+    state.update_crosshair(state.viewport.time_to_x(state.candles()[50].time), y);
+    assert!((state.crosshair.price - close).abs() < 1e-6);
+}
+
+#[test]
+fn without_panes_the_price_scale_covers_the_whole_height() {
+    let mut state = fitted(100);
+    let _ = frame(&mut state, &RenderExtras::default());
+    assert_eq!(state.viewport.pane_inset, 0.0);
+    assert_eq!(state.viewport.price_height(), 400.0);
+}
