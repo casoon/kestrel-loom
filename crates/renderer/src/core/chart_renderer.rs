@@ -1009,6 +1009,9 @@ fn render_indicator_panes(
             for value in &pane_ticks.values {
                 let y = value_to_y(*value);
                 renderer.draw_line(0.0, y, content_w, y, state.options.grid_color, 1.0);
+                if y < plot_top + 3.0 || y > plot_top + plot_h - 3.0 {
+                    continue;
+                }
                 renderer.draw_text(
                     &ticks::format_price(*value, pane_ticks.decimals),
                     width - 6.0,
@@ -1074,7 +1077,9 @@ fn render_axes(state: &ChartState, indicator_panes: &[IndicatorPane], renderer: 
         let stride = ticks::label_stride(gap, MIN_LABEL_GAP_PX).max(1);
         for (index, price) in values.iter().enumerate() {
             let y = price_y(*price);
-            if index % stride != 0 || y < 0.0 || y > main_height {
+            // Eine Beschriftung, die am Rand halb abgeschnitten würde, entfällt.
+            let edge = f64::from(LABEL_FONT_PX) / 2.0 + 1.0;
+            if index % stride != 0 || y < edge || y > main_height - edge {
                 continue;
             }
             renderer.draw_text(

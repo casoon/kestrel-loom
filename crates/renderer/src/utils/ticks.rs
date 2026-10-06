@@ -25,11 +25,14 @@ pub fn nice_step(range: f64, target_intervals: f64) -> f64 {
     let raw = range / target_intervals;
     let magnitude = 10f64.powf(raw.log10().floor());
     let fraction = raw / magnitude;
-    let nice = if fraction <= 1.0 {
+    // Übliche Schwellen (1,5 / 3 / 7): rundet zum nächsten glatten Wert statt immer
+    // nach oben. Mit „bis 5 → 5, darüber 10“ ergäbe eine Spanne von 0,033 nur drei
+    // Marken, weil 5,5 auf 10 springt.
+    let nice = if fraction <= 1.5 {
         1.0
-    } else if fraction <= 2.0 {
+    } else if fraction <= 3.0 {
         2.0
-    } else if fraction <= 5.0 {
+    } else if fraction <= 7.0 {
         5.0
     } else {
         10.0
@@ -109,8 +112,9 @@ mod tests {
     fn steps_are_one_two_or_five_times_a_power_of_ten() {
         assert_eq!(nice_step(100.0, 5.0), 20.0);
         assert_eq!(nice_step(10.0, 5.0), 2.0);
-        assert_eq!(nice_step(7.0, 5.0), 2.0);
-        assert_eq!(nice_step(0.012, 5.0), 0.005);
+        assert_eq!(nice_step(7.0, 5.0), 1.0);
+        assert_eq!(nice_step(0.033, 6.0), 0.005);
+        assert_eq!(nice_step(0.012, 5.0), 0.002);
         assert_eq!(nice_step(480.0, 5.0), 100.0);
     }
 
@@ -133,11 +137,11 @@ mod tests {
     #[test]
     fn ticks_lie_on_multiples_of_the_step_inside_the_range() {
         let ticks = price_ticks(1.0834, 1.0951, 5.0);
-        assert_eq!(ticks.step, 0.005);
+        assert_eq!(ticks.step, 0.002);
         assert_eq!(ticks.decimals, 3);
         assert!(ticks.values.iter().all(|v| *v >= 1.0834 && *v <= 1.0951));
-        assert_eq!(format_price(ticks.values[0], ticks.decimals), "1.085");
-        assert_eq!(ticks.values.len(), 3);
+        assert_eq!(format_price(ticks.values[0], ticks.decimals), "1.084");
+        assert_eq!(ticks.values.len(), 6);
     }
 
     #[test]
