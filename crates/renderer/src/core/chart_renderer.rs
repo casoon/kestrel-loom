@@ -258,6 +258,26 @@ pub fn render_chart(state: &mut ChartState, extras: &RenderExtras, renderer: &mu
     // überdecken sonst, was darüber hinausragt.
     renderer.set_clip(0.0, 0.0, state.viewport.plot_width(), main_height);
 
+    // Chartkit-Szenen in zwei Durchgängen: Flächen (`z_order` ≤ 0, etwa Zonen)
+    // liegen hinter den Kerzen, Linien, Marker und Beschriftungen davor.
+    let artifact_scene = if draw_indicator_artifacts {
+        let fallback = match (state.candles().first(), state.candles().last()) {
+            (Some(first), Some(last)) => Some((first.time.get(), last.time.get())),
+            _ => None,
+        };
+        scene_from_indicator_panes(indicator_panes, fallback)
+    } else {
+        None
+    };
+    for layer_scene in artifact_scene.iter().chain(scene) {
+        crate::core::scene::render_scene_layer(
+            layer_scene,
+            state,
+            renderer,
+            crate::core::scene::SceneLayer::Behind,
+        );
+    }
+
     if state.options.show_volume {
         render_volume(state, renderer, main_height);
     }
@@ -487,31 +507,23 @@ pub fn render_chart(state: &mut ChartState, extras: &RenderExtras, renderer: &mu
         }
     }
 
-    // Restore full canvas height for layout (indicator panes, axes, crosshair)
-    state.viewport.dimensions.height = full_height;
-
-    // Draw comparison symbols as percent-performance overlays with their
-    // own right-side scale.
+    // Bis hierher bleibt die Viewport-Höhe die des Hauptbereichs: Overlays, Szenen,
+    // Vergleiche und Werkzeuge bilden Preise über dieselbe Skala ab wie die Kerzen.
+    // Mit der vollen Höhe lägen sie bei jedem Indikator-Pane neben den Kerzen.
     renderer.set_clip(0.0, 0.0, state.viewport.plot_width(), main_height);
     render_overlay_indicators(indicator_panes, state, renderer);
 
-    if draw_indicator_artifacts {
-        let fallback = match (state.candles().first(), state.candles().last()) {
-            (Some(first), Some(last)) => Some((first.time.get(), last.time.get())),
-            _ => None,
-        };
-        if let Some(artifact_scene) = scene_from_indicator_panes(indicator_panes, fallback) {
-            crate::core::scene::render_scene(&artifact_scene, state, renderer);
-        }
-    }
-
-    if let Some(scene) = scene {
-        crate::core::scene::render_scene(scene, state, renderer);
+    for layer_scene in artifact_scene.iter().chain(scene) {
+        crate::core::scene::render_scene_layer(
+            layer_scene,
+            state,
+            renderer,
+            crate::core::scene::SceneLayer::Front,
+        );
     }
 
     render_compare_symbols(compare_symbols, state, renderer, main_height);
     renderer.clear_clip();
-    render_indicator_panes(indicator_panes, state, renderer);
 
     // Draw drawing tools
     {
@@ -528,6 +540,10 @@ pub fn render_chart(state: &mut ChartState, extras: &RenderExtras, renderer: &mu
     renderer.set_clip(0.0, 0.0, state.viewport.plot_width(), main_height);
     render_selected_tool_highlights(state, renderer);
     renderer.clear_clip();
+
+    // Volle Zeichenhöhe für Panes, Achsen und Fadenkreuz.
+    state.viewport.dimensions.height = full_height;
+    render_indicator_panes(indicator_panes, state, renderer);
 
     // Draw crosshair with pixel-perfect rendering
     if state.options.show_crosshair && state.crosshair.visible {
@@ -741,16 +757,27 @@ fn main_chart_height(indicator_panes: &[IndicatorPane], height: f64) -> f64 {
     height * (1.0 - indicator_total).max(0.38)
 }
 
-/// Farbe der n-ten Linie eines Indikators. Erste Linie kräftig, weitere gedämpft —
-/// Bänder sollen den Hauptwert nicht überschreien.
-fn line_color(index: usize) -> Color {
-    match index {
-        0 => Color::rgba(88, 166, 255, 0.95),
-        1 => Color::rgba(255, 166, 87, 0.85),
-        2 => Color::rgba(126, 231, 135, 0.85),
-        3 => Color::rgba(219, 109, 255, 0.8),
-        _ => Color::rgba(160, 180, 200, 0.7),
-    }
+/// Farbe der n-ten Linie eines Indikators — vier ruhige Töne je Theme, wie im
+/// ruhigen Chart (chartlet). Höchstens vier Farben: mehr trennt das Auge nicht, und
+/// die Kerzen sollen führen.
+fn line_color(index: usize, dark: bool) -> Color {
+    let (r, g, b) = match (dark, index) {
+        (true, 0) => (126, 166, 255),
+        (true, 1) => (255, 156, 114),
+        (true, 2) => (154, 167, 189),
+        (true, _) => (226, 232, 244),
+        (false, 0) => (37, 99, 235),
+        (false, 1) => (194, 65, 12),
+        (false, 2) => (71, 85, 105),
+        (false, _) => (17, 24, 39),
+    };
+    Color::rgba(r, g, b, if index == 0 { 0.95 } else { 0.85 })
+}
+
+/// Ist der Hintergrund dunkel? Entscheidet über die Linienpalette.
+fn is_dark(state: &ChartState) -> bool {
+    let bg = state.options.background_color;
+    u16::from(bg.r) + u16::from(bg.g) + u16::from(bg.b) < 384
 }
 
 /// Zeichnet Indikatoren, deren Werte in Preiseinheiten liegen, auf den Preischart.
@@ -773,7 +800,7 @@ fn render_overlay_indicators(
                 .map(|(time, value)| (vp.time_to_x(*time), vp.price_to_y(*value)))
                 .collect();
             if points.len() >= 2 {
-                renderer.draw_polyline(&points, line_color(index), 1.4);
+                renderer.draw_polyline(&points, line_color(index, is_dark(state)), 1.4);
             }
         }
     }
@@ -998,7 +1025,7 @@ fn render_indicator_panes(
                 if points.len() >= 2 {
                     renderer.draw_polyline(
                         &points,
-                        line_color(index),
+                        line_color(index, is_dark(state)),
                         if index == 0 { 1.6 } else { 1.2 },
                     );
                 }

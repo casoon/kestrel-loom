@@ -828,3 +828,132 @@ fn an_overlay_does_not_move_the_panes() {
 
     assert_eq!(rsi_title_y(false), rsi_title_y(true));
 }
+
+// --- Skala mit Indikator-Panes ---
+
+fn scene_with(
+    objects: Vec<kestrel_chartkit::viz::scene::SceneObject>,
+) -> kestrel_chartkit::viz::scene::Scene {
+    use kestrel_chartkit::viz::scene::{Pane, Scene};
+    let mut pane = Pane::new("price", 1.0);
+    for object in objects {
+        pane.upsert_object(object);
+    }
+    let mut scene = Scene::new();
+    scene.upsert_pane(pane);
+    scene
+}
+
+/// Ein Pane verkleinert den Hauptbereich. Szenen und Overlays müssen über dieselbe
+/// Preisskala abgebildet werden wie die Kerzen — mit der vollen Zeichenhöhe lägen sie
+/// bei jedem Pane neben den Kerzen (so stand es bis 2026-10-06).
+#[test]
+fn a_scene_line_uses_the_same_price_scale_as_the_candles_when_a_pane_is_present() {
+    use kestrel_chartkit::viz::scene::{LineStyle, SceneObject, SceneObjectKind};
+
+    let mut generator = CandleGenerator::new(GeneratorConfig::crypto().with_seed(42));
+    let mut state = ChartState::new(800, 400, Timeframe::M5);
+    state.set_candles(generator.generate(100));
+    state.fit_to_data();
+
+    // Ein Preis, an dem das Gitter eine Linie hat: dort muss die Szenenlinie liegen.
+    let ticks = kestrel_loom::utils::ticks::price_ticks(
+        state.viewport.price.min,
+        state.viewport.price.max,
+        kestrel_loom::utils::ticks::TARGET_INTERVALS,
+    );
+    let price = ticks.values[ticks.values.len() / 2];
+    let (start, end) = (state.candles()[0].time, state.candles()[99].time);
+    let scene = scene_with(vec![SceneObject::new(
+        "line",
+        1,
+        1.0,
+        SceneObjectKind::Polyline {
+            points: vec![(start.get() as f64, price), (end.get() as f64, price)],
+            color: "#58a6ff".to_string(),
+            style: LineStyle::Solid,
+            width: 1.0,
+        },
+    )]);
+
+    let mut panes = vec![IndicatorPane::new("rsi", "rsi", HashMap::new(), 0.28).unwrap()];
+    update_indicator_panes(&mut panes, state.candles());
+    let extras = RenderExtras {
+        indicator_panes: &panes,
+        scene: Some(&scene),
+        ..Default::default()
+    };
+    let commands = frame(&mut state, &extras);
+
+    let line_y = commands
+        .iter()
+        .find_map(|c| match c {
+            RenderCommand::IndicatorLine { points, .. } if points.len() == 2 => Some(points[0].1),
+            _ => None,
+        })
+        .expect("Szenenlinie");
+    let grid_ys: Vec<f64> = commands
+        .iter()
+        .filter_map(|c| match c {
+            RenderCommand::Line { y1, y2, x1, .. } if y1 == y2 && *x1 == 0.0 => Some(*y1),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        grid_ys.iter().any(|g| (g - line_y).abs() < 1e-6),
+        "Szenenlinie bei y={line_y} liegt nicht auf der Gitterlinie desselben Preises ({grid_ys:?})"
+    );
+}
+
+#[test]
+fn zones_sit_behind_the_candles_and_labels_in_front() {
+    use kestrel_chartkit::viz::scene::{SceneObject, SceneObjectKind};
+
+    let mut state = fitted(120);
+    let (start, end) = (state.candles()[0].time, state.candles()[119].time);
+    let price = state.candles()[60].c;
+    let scene = scene_with(vec![
+        SceneObject::new(
+            "zone",
+            0,
+            0.2,
+            SceneObjectKind::BoundedBox {
+                x0: start.get() as f64,
+                y0: price - 0.0005,
+                x1: end.get() as f64,
+                y1: price + 0.0005,
+                fill_color: Some("#888888".to_string()),
+                border_color: None,
+            },
+        ),
+        SceneObject::new(
+            "label",
+            2,
+            1.0,
+            SceneObjectKind::Text {
+                x: start.get() as f64,
+                y: price,
+                content: "Niveau".to_string(),
+                color: "#ffffff".to_string(),
+            },
+        ),
+    ]);
+    let extras = RenderExtras {
+        scene: Some(&scene),
+        ..Default::default()
+    };
+    let commands = frame(&mut state, &extras);
+
+    let index_of = |pred: &dyn Fn(&RenderCommand) -> bool| commands.iter().position(pred).unwrap();
+    // Die Zone ist das einzige Rechteck, das fast die ganze Datenbreite füllt.
+    let zone = index_of(&|c| matches!(c, RenderCommand::Rect { width, .. } if *width > 300.0));
+    let first_body = index_of(&|c| matches!(c, RenderCommand::Rect { width, .. } if *width < 20.0));
+    let label = index_of(&|c| matches!(c, RenderCommand::Text { text, .. } if text == "Niveau"));
+    let last_body = commands
+        .iter()
+        .rposition(|c| matches!(c, RenderCommand::Rect { width, .. } if *width < 20.0))
+        .unwrap();
+
+    assert!(zone < first_body, "die Zone liegt hinter den Kerzen");
+    assert!(label > last_body, "die Beschriftung liegt vor den Kerzen");
+}
