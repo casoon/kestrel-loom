@@ -38,17 +38,19 @@ pub struct ChartOptions {
 impl Default for ChartOptions {
     fn default() -> Self {
         Self {
-            background_color: Color::rgba(10, 14, 18, 1.0),
-            grid_color: Color::rgba(45, 54, 64, 0.3),
-            text_color: Color::rgba(231, 233, 234, 1.0),
-            crosshair_color: Color::rgba(139, 152, 165, 0.5),
-            bullish_color: Color::rgba(34, 197, 94, 1.0),
-            bearish_color: Color::rgba(239, 68, 68, 1.0),
-            unchanged_color: Color::rgba(201, 203, 207, 1.0), // Gray for Doji
+            background_color: Color::rgba(14, 19, 28, 1.0),
+            grid_color: Color::rgba(42, 51, 66, 1.0),
+            text_color: Color::rgba(232, 237, 246, 1.0),
+            crosshair_color: Color::rgba(169, 180, 199, 0.7),
+            bullish_color: Color::rgba(153, 246, 228, 1.0),
+            bearish_color: Color::rgba(229, 72, 77, 1.0),
+            unchanged_color: Color::rgba(169, 180, 199, 1.0), // Doji
             candle_style: CandleStyle::Candlestick,
             show_grid: true,
             show_crosshair: true,
-            show_volume: true,
+            // Volumen nur auf ausdrücklichen Wunsch des Aufrufers: ob es echt ist,
+            // weiß der Chart nicht.
+            show_volume: false,
             sessions: Vec::new(),
             show_sessions: false,
             show_scrollbar: true,
@@ -135,6 +137,8 @@ impl ChartState {
     pub fn new(width: u32, height: u32, timeframe: Timeframe) -> Self {
         let mut viewport = Viewport::new(width, height);
         viewport.set_timeframe(timeframe);
+        // `render_chart` zeichnet die Preisachse immer; der Datenbereich endet davor.
+        viewport.axis_inset = crate::core::chart_renderer::PRICE_AXIS_WIDTH_PX;
 
         Self {
             viewport,
@@ -253,8 +257,14 @@ impl ChartState {
             max_price = max_price.max(candle.h);
         }
 
-        // Add 5% padding
+        // 5 % Luft, dann beide Enden nach außen auf den glatten Schritt der Achse:
+        // oberste und unterste Gitterlinie liegen am Rand der Zeichenfläche.
         let price_padding = (max_price - min_price) * 0.05;
+        let (low, high) = crate::utils::ticks::nice_bounds(
+            min_price - price_padding,
+            max_price + price_padding,
+            crate::utils::ticks::TARGET_INTERVALS,
+        );
 
         self.viewport.fit_to_data(
             TimeRange {
@@ -262,8 +272,8 @@ impl ChartState {
                 end: time_end,
             },
             PriceRange {
-                min: min_price - price_padding,
-                max: max_price + price_padding,
+                min: low,
+                max: high,
             },
         );
 

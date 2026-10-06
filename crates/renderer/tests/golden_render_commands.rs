@@ -642,3 +642,189 @@ fn a_compare_bar_in_a_trading_break_sits_between_the_neighbours() {
         points[1].0
     );
 }
+
+// --- Ruhiger Chart: Achsen, Datenbereich, Volumen, Fadenkreuz ---
+
+fn frame(state: &mut ChartState, extras: &RenderExtras) -> Vec<RenderCommand> {
+    let mut r = BatchRenderer::new(800, 400);
+    render_chart(state, extras, &mut r);
+    r.commands().to_vec()
+}
+
+fn fitted(count: usize) -> ChartState {
+    let mut generator = CandleGenerator::new(GeneratorConfig::crypto().with_seed(7));
+    let mut state = ChartState::new(800, 400, Timeframe::M5);
+    state.set_candles(generator.generate(count));
+    state.fit_to_data();
+    state
+}
+
+#[test]
+fn the_price_grid_sits_on_the_labelled_ticks() {
+    let mut state = fitted(150);
+    let commands = frame(&mut state, &RenderExtras::default());
+
+    let label_ys: Vec<f64> = commands
+        .iter()
+        .filter_map(|c| match c {
+            // Preisbeschriftungen stehen in der Achsenspalte, rechts.
+            RenderCommand::Text { x, y, text, .. }
+                if *x > 700.0 && text.chars().next().is_some_and(|c| c.is_ascii_digit()) =>
+            {
+                Some(*y)
+            }
+            _ => None,
+        })
+        .collect();
+    let grid_ys: Vec<f64> = commands
+        .iter()
+        .filter_map(|c| match c {
+            RenderCommand::Line { y1, y2, x1, .. } if y1 == y2 && *x1 == 0.0 => Some(*y1),
+            _ => None,
+        })
+        .collect();
+
+    assert!(label_ys.len() >= 3, "es gibt Preisbeschriftungen");
+    for y in &label_ys {
+        assert!(
+            grid_ys.iter().any(|g| (g - y).abs() < 1e-6),
+            "zur Beschriftung bei y={y} gehört eine Gitterlinie"
+        );
+    }
+}
+
+#[test]
+fn every_price_label_has_the_same_number_of_decimals() {
+    let mut state = fitted(150);
+    let commands = frame(&mut state, &RenderExtras::default());
+    let decimals: Vec<usize> = commands
+        .iter()
+        .filter_map(|c| match c {
+            RenderCommand::Text { x, text, .. } if *x > 700.0 => {
+                Some(text.split('.').nth(1).map_or(0, str::len))
+            }
+            _ => None,
+        })
+        .collect();
+    assert!(decimals.windows(2).all(|w| w[0] == w[1]), "{decimals:?}");
+}
+
+#[test]
+fn the_data_ends_before_the_price_axis() {
+    let state = fitted(150);
+    let last = state.candles().last().unwrap().time;
+    let x = state.viewport.time_to_x(last);
+    assert!(
+        x < state.viewport.plot_width() && state.viewport.plot_width() <= 800.0 - 64.0,
+        "die jüngste Kerze (x={x}) liegt links der Achsenspalte"
+    );
+}
+
+#[test]
+fn the_grid_stops_at_the_axis_column() {
+    let mut state = fitted(150);
+    let commands = frame(&mut state, &RenderExtras::default());
+    for c in &commands {
+        if let RenderCommand::Line { x1, x2, y1, y2, .. } = c {
+            // Gitterlinien beginnen links außen; Doji-Körper und Ähnliches nicht.
+            if y1 == y2 && *x1 == 0.0 {
+                assert!(*x2 <= 800.0 - 64.0 + 1e-6, "Gitterlinie reicht bis {x2}");
+            }
+        }
+    }
+}
+
+fn wide_rects(commands: &[RenderCommand]) -> usize {
+    commands
+        .iter()
+        .filter(|c| matches!(c, RenderCommand::Rect { height, .. } if *height > 0.0))
+        .count()
+}
+
+#[test]
+fn volume_is_only_drawn_when_asked_for() {
+    let mut state = fitted(150);
+    let without = wide_rects(&frame(&mut state, &RenderExtras::default()));
+
+    state.options.show_volume = true;
+    state.mark_dirty();
+    let with = wide_rects(&frame(&mut state, &RenderExtras::default()));
+
+    assert!(
+        with > without + 50,
+        "Histogramm kommt hinzu ({without} → {with})"
+    );
+}
+
+#[test]
+fn zero_volume_draws_no_histogram() {
+    let mut state = fitted(150);
+    let candles: Vec<Candle> = state
+        .candles()
+        .iter()
+        .map(|c| Candle::new(c.time, c.o, c.h, c.l, c.c, 0.0))
+        .collect();
+    state.set_candles(candles);
+    state.options.show_volume = true;
+    let with = wide_rects(&frame(&mut state, &RenderExtras::default()));
+
+    state.options.show_volume = false;
+    state.mark_dirty();
+    let without = wide_rects(&frame(&mut state, &RenderExtras::default()));
+    assert_eq!(
+        with, without,
+        "ohne Volumen in den Kerzen gibt es nichts zu zeichnen"
+    );
+}
+
+#[test]
+fn the_crosshair_snaps_to_the_candle_under_the_pointer() {
+    let mut state = fitted(150);
+    state.update_crosshair(300.3, 120.0);
+    let commands = frame(&mut state, &RenderExtras::default());
+
+    // Das Fadenkreuz geht in die Befehle als senkrechte Linie ein, die nicht zum Gitter
+    // gehört: sie steht genau auf dem Mittelpunkt einer Kerze.
+    let candle_xs: Vec<f64> = state
+        .candles()
+        .iter()
+        .map(|c| state.viewport.time_to_x(c.time))
+        .collect();
+    let snapped = commands.iter().any(|c| match c {
+        RenderCommand::Line { x1, x2, y1, y2, .. } if x1 == x2 && y1 != y2 => {
+            candle_xs.iter().any(|cx| (cx - x1).abs() < 1e-6)
+        }
+        _ => false,
+    });
+    assert!(snapped, "eine senkrechte Linie steht auf einer Kerze");
+}
+
+#[test]
+fn an_overlay_does_not_move_the_panes() {
+    let mut generator = CandleGenerator::new(GeneratorConfig::crypto().with_seed(42));
+    let candles = generator.generate(100);
+
+    let rsi_title_y = |with_overlay: bool| {
+        let mut state = ChartState::new(800, 400, Timeframe::M5);
+        state.set_candles(candles.clone());
+        state.fit_to_data();
+        let mut panes = vec![IndicatorPane::new("rsi", "rsi", HashMap::new(), 0.28).unwrap()];
+        if with_overlay {
+            panes.push(IndicatorPane::new("b", "bollinger", HashMap::new(), 0.28).unwrap());
+        }
+        update_indicator_panes(&mut panes, state.candles());
+        let extras = RenderExtras {
+            indicator_panes: &panes,
+            ..Default::default()
+        };
+        frame(&mut state, &extras)
+            .iter()
+            .find_map(|c| match c {
+                RenderCommand::Text { text, y, .. } if text == "RSI" => Some(*y),
+                _ => None,
+            })
+            .expect("Pane-Titel")
+    };
+
+    assert_eq!(rsi_title_y(false), rsi_title_y(true));
+}

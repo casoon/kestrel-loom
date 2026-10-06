@@ -532,18 +532,39 @@ impl WasmChart {
     pub fn set_theme(&mut self, dark: bool) {
         use kestrel_loom::primitives::Color;
         let opts = &mut self.state.options;
+        // Ruhige Palette: neutrale Fläche, kontrastarmes Gitter, Auf/Ab in zwei
+        // Farben, die auch in Graustufen und bei Farbsehschwäche auseinanderliegen.
         if dark {
-            opts.background_color = Color::rgba(10, 14, 18, 1.0);
-            opts.grid_color = Color::rgba(45, 54, 64, 0.3);
-            opts.text_color = Color::rgba(231, 233, 234, 1.0);
-            opts.crosshair_color = Color::rgba(139, 152, 165, 0.5);
+            opts.background_color = Color::rgba(14, 19, 28, 1.0);
+            opts.grid_color = Color::rgba(42, 51, 66, 1.0);
+            opts.text_color = Color::rgba(232, 237, 246, 1.0);
+            opts.crosshair_color = Color::rgba(169, 180, 199, 0.7);
+            opts.bullish_color = Color::rgba(153, 246, 228, 1.0);
+            opts.bearish_color = Color::rgba(229, 72, 77, 1.0);
+            opts.unchanged_color = Color::rgba(169, 180, 199, 1.0);
         } else {
             opts.background_color = Color::rgba(255, 255, 255, 1.0);
-            opts.grid_color = Color::rgba(180, 180, 180, 0.3);
-            opts.text_color = Color::rgba(20, 20, 20, 1.0);
-            opts.crosshair_color = Color::rgba(80, 80, 80, 0.5);
+            opts.grid_color = Color::rgba(217, 222, 232, 1.0);
+            opts.text_color = Color::rgba(23, 32, 51, 1.0);
+            opts.crosshair_color = Color::rgba(102, 112, 133, 0.7);
+            opts.bullish_color = Color::rgba(10, 79, 73, 1.0);
+            opts.bearish_color = Color::rgba(208, 58, 15, 1.0);
+            opts.unchanged_color = Color::rgba(102, 112, 133, 1.0);
         }
         self.state.mark_dirty();
+    }
+
+    /// Volumen unten in der Preis-Pane ein- oder ausschalten. Aus ist der Standard:
+    /// der Aufrufer weiß, ob die Quelle echtes Börsenvolumen liefert; der Chart nicht.
+    #[wasm_bindgen(js_name = setShowVolume)]
+    pub fn set_show_volume(&mut self, show: bool) {
+        self.state.options.show_volume = show;
+        self.state.mark_dirty();
+    }
+
+    #[wasm_bindgen(js_name = getShowVolume)]
+    pub fn get_show_volume(&self) -> bool {
+        self.state.options.show_volume
     }
 
     /// Get crosshair position as JSON

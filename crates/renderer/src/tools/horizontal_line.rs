@@ -74,7 +74,7 @@ impl ChartTool for HorizontalLine {
 
             match self.style {
                 LineStyle::Solid => {
-                    let width = viewport.dimensions.width as f64;
+                    let width = viewport.plot_width();
                     renderer.draw_line(0.0, y, width, y, self.color, self.width as f32);
                 }
                 LineStyle::Dashed { .. } => {
@@ -86,7 +86,7 @@ impl ChartTool for HorizontalLine {
             }
 
             // Draw price label on the line
-            let label_x = viewport.dimensions.width as f64 - 80.0;
+            let label_x = viewport.plot_width() - 80.0;
             renderer.draw_text(
                 &format!("{:.2}", price),
                 label_x,
@@ -130,7 +130,7 @@ impl ChartTool for HorizontalLine {
 
 impl HorizontalLine {
     fn draw_dashed_horizontal(&self, renderer: &mut dyn Renderer, viewport: &Viewport, y: f64) {
-        let width = viewport.dimensions.width as f64;
+        let width = viewport.plot_width();
         let dash_length = 8.0;
         let gap_length = 4.0;
         let pattern_length = dash_length + gap_length;
@@ -144,7 +144,7 @@ impl HorizontalLine {
     }
 
     fn draw_dotted_horizontal(&self, renderer: &mut dyn Renderer, viewport: &Viewport, y: f64) {
-        let width = viewport.dimensions.width as f64;
+        let width = viewport.plot_width();
         let dot_spacing = 6.0;
 
         let mut x = 0.0;

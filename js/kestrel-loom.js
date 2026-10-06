@@ -60,16 +60,23 @@ export async function createChart(canvas, options = {}) {
   const applySize = () => {
     const r = canvas.getBoundingClientRect();
     if (r.width < 1 || r.height < 1) return;
-    const dpr = window.devicePixelRatio || 1;
-    canvas.width = Math.round(r.width * dpr);
-    canvas.height = Math.round(r.height * dpr);
-    // resize() markiert den Zustand als verändert — der Browser hat den Canvas
-    // beim Setzen von width/height geleert.
+    // Vor dem Anhängen des Canvas legt nur der Zustand die Maße fest; danach setzt
+    // der Renderer die Pixelgröße selbst, mit dem aktuellen Pixelverhältnis.
+    // Beides hier zu tun, leerte den Canvas zweimal je Größenwechsel.
+    // resize() markiert den Zustand als verändert.
+    if (!attached) {
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = Math.round(r.width * dpr);
+      canvas.height = Math.round(r.height * dpr);
+    }
     chart.resize(r.width, r.height);
   };
 
+  let attached = false;
+
   applySize();
   chart.attachCanvas(canvas);
+  attached = true;
   chart.setTheme(dark);
 
   const teardown = [];
@@ -184,6 +191,23 @@ export async function createChart(canvas, options = {}) {
     teardown.push(() => observer.disconnect());
   }
 
+  // Das Pixelverhältnis ändert sich, wenn das Fenster auf einen anderen Bildschirm
+  // wechselt oder der Nutzer zoomt — die Größe in CSS-Pixeln bleibt dabei gleich,
+  // der ResizeObserver meldet also nichts, und der Chart wäre unscharf.
+  if (autoResize && typeof matchMedia === 'function') {
+    let query = null;
+    const onRatioChange = () => {
+      applySize();
+      watchRatio();
+    };
+    const watchRatio = () => {
+      query = matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`);
+      query.addEventListener('change', onRatioChange, { once: true });
+    };
+    watchRatio();
+    teardown.push(() => query.removeEventListener('change', onRatioChange));
+  }
+
   let frame = null;
   let running = false;
   const draw = () => chart.render();
@@ -247,6 +271,11 @@ export async function createChart(canvas, options = {}) {
        */
       scrollbar: (on) =>
         on === undefined ? chart.getShowScrollbar() : chart.setShowScrollbar(on),
+      /**
+       * Volumen unten in der Preis-Pane. Standard: aus. Der Chart weiß nicht, ob die
+       * Quelle echtes Börsenvolumen liefert — das entscheidet der Aufrufer.
+       */
+      volume: (on) => (on === undefined ? chart.getShowVolume() : chart.setShowVolume(on)),
       /** Bildschirm-x eines Zeitstempels — für eigene Marker über dem Chart. */
       timeToX: (time) => chart.timeToX(t(time)),
       /** Zeitstempel an einer Bildschirmposition. */

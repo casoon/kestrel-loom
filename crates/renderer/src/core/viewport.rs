@@ -101,6 +101,10 @@ pub struct Viewport {
     pub scale_mode: ViewportScaleMode,
     /// Base price for percent/indexed modes (first visible candle close)
     pub scale_base_price: f64,
+    /// Breite der Preisachse rechts, die der Datenbereich nicht überdeckt. Auf 0
+    /// bleibt der Datenbereich so breit wie die Zeichenfläche (Standard, solange
+    /// der Aufrufer keine Achse zeichnet).
+    pub axis_inset: f64,
 }
 
 impl Viewport {
@@ -130,7 +134,13 @@ impl Viewport {
             timezone_offset_minutes: 0,
             scale_mode: ViewportScaleMode::Price,
             scale_base_price: 0.0,
+            axis_inset: 0.0,
         }
+    }
+
+    /// Breite des Datenbereichs: die Zeichenfläche ohne Preisachse.
+    pub fn plot_width(&self) -> f64 {
+        (self.dimensions.width as f64 - self.axis_inset).max(1.0)
     }
 
     /// Set dimensions
@@ -258,7 +268,7 @@ impl Viewport {
     /// taten schlicht nichts.
     pub fn pan(&mut self, delta_x: i32, delta_y: i32) {
         if delta_x != 0 {
-            let bars_per_pixel = self.bars.span() / self.dimensions.width.max(1) as f64;
+            let bars_per_pixel = self.bars.span() / self.plot_width();
             let shift = -delta_x as f64 * bars_per_pixel;
             self.bars.first += shift;
             self.bars.last += shift;
@@ -303,7 +313,7 @@ impl Viewport {
     pub fn zoom(&mut self, factor: f64, center_x: Option<u32>) {
         let cx = center_x
             .map(|c| c as f64)
-            .unwrap_or(self.dimensions.width as f64 / 2.0);
+            .unwrap_or(self.plot_width() / 2.0);
         let center_bar = self.x_to_bar(cx);
 
         let new_span = self.bars.span() * factor;
@@ -325,13 +335,12 @@ impl Viewport {
         if span <= 0.0 {
             return 0.0;
         }
-        (bar - self.bars.first) / span * self.dimensions.width as f64
+        (bar - self.bars.first) / span * self.plot_width()
     }
 
     /// Fraktionaler Bar-Index an einer Bildschirmposition.
     pub fn x_to_bar(&self, x: f64) -> f64 {
-        let width = self.dimensions.width.max(1) as f64;
-        self.bars.first + (x / width) * self.bars.span()
+        self.bars.first + (x / self.plot_width()) * self.bars.span()
     }
 
     /// Convert time to x pixel coordinate
@@ -387,7 +396,7 @@ impl Viewport {
         if span <= 0.0 {
             return 1.0;
         }
-        let base = self.dimensions.width as f64 / span;
+        let base = self.plot_width() / span;
         (base + self.bar_spacing_extra).clamp(1.0, 200.0)
     }
 
@@ -488,7 +497,7 @@ impl Viewport {
         let start_x = start_x.max(0.0);
 
         // Calculate scale coefficient with 20% padding
-        let width = self.dimensions.width as f64;
+        let width = self.plot_width();
         let padding_factor = 0.2;
 
         let scale_coeff = (start_x + (width - 1.0) * padding_factor)
@@ -810,5 +819,22 @@ mod unit_consistency_tests {
             after < before,
             "zoom(0.5) muss den Ausschnitt verkleinern (vorher {before}, nachher {after})"
         );
+    }
+
+    #[test]
+    fn the_plot_width_leaves_room_for_the_price_axis() {
+        let mut vp = Viewport::new(800, 400);
+        assert_eq!(
+            vp.plot_width(),
+            800.0,
+            "ohne Achse bleibt es bei der vollen Breite"
+        );
+
+        vp.axis_inset = 64.0;
+        assert_eq!(vp.plot_width(), 736.0);
+        vp.set_bars(0.0, 100.0);
+        assert!((vp.bar_to_x(100.0) - 736.0).abs() < 1e-9);
+        assert!((vp.x_to_bar(736.0) - 100.0).abs() < 1e-9);
+        assert!((vp.bar_width() - 7.36).abs() < 1e-9);
     }
 }

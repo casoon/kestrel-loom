@@ -238,6 +238,14 @@ fn an_overlay_has_no_pane_and_costs_no_height() {
 }
 
 #[wasm_bindgen_test]
+fn volume_is_off_until_the_caller_asks_for_it() {
+    let mut chart = chart_with_data(60);
+    assert!(!chart.get_show_volume());
+    chart.set_show_volume(true);
+    assert!(chart.get_show_volume());
+}
+
+#[wasm_bindgen_test]
 fn indicator_parameters_must_be_numbers() {
     let mut chart = chart_with_data(60);
     assert!(chart.add_indicator_pane("rsi", "{\"rsi_len\": 21}").is_ok());

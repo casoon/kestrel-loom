@@ -147,11 +147,14 @@ pub fn render_scene(scene: &Scene, state: &ChartState, renderer: &mut dyn Render
                     content,
                     color,
                 } => {
-                    renderer.draw_text(
+                    // Beschriftungen mit Saum in Hintergrundfarbe: lesbar über Kerzen und
+                    // Linien, ohne Kasten.
+                    renderer.draw_text_halo(
                         content,
                         x(*tx),
                         y(*ty),
                         with_opacity(parse_color(color), alpha),
+                        state.options.background_color,
                         11.0,
                         crate::rendering::TextAlign::Left,
                         crate::rendering::TextBaseline::Middle,

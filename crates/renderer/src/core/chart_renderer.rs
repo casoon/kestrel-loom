@@ -13,6 +13,7 @@ use crate::core::types::Seconds;
 use crate::core::{Candle, ChartState, FootprintCandle};
 use crate::primitives::Color;
 use crate::rendering::Renderer;
+use crate::utils::ticks::{self, TARGET_INTERVALS};
 
 /// Ein Vergleichsinstrument, das über den Hauptchart gelegt wird.
 pub struct CompareSymbol {
@@ -97,6 +98,14 @@ const AXIS_LABEL_WIDTH_PX: f64 = 64.0;
 pub const PRICE_AXIS_WIDTH_PX: f64 = 64.0;
 /// Höhe der Zeitachse unten.
 pub const TIME_AXIS_HEIGHT_PX: f64 = 20.0;
+/// Schriftgröße der Achsenbeschriftung und der Pane-Titel.
+const LABEL_FONT_PX: f32 = 11.0;
+/// Preismarken, die dichter als so viele Pixel liegen, werden nur jede n-te beschriftet.
+const MIN_LABEL_GAP_PX: f64 = 14.0;
+/// Anteil der Preis-Pane, den das Volumen unten einnimmt.
+const VOLUME_BAND_SHARE: f64 = 0.22;
+/// Höhe des Titelstreifens über jedem Indikator-Pane.
+const PANE_TITLE_BAND_PX: f64 = 18.0;
 
 /// Lage der Zeitleiste: über der Zeitachse, über die Inhaltsbreite.
 pub fn scrollbar_geometry(width: f64, height: f64) -> ScrollbarGeometry {
@@ -216,20 +225,18 @@ pub fn render_chart(state: &mut ChartState, extras: &RenderExtras, renderer: &mu
         let grid_color = state.options.grid_color;
         let vp = &state.viewport;
 
-        // Draw horizontal grid lines — log-spaced when log scale is active
-        let num_lines = 10;
+        // Das Gitter liegt auf denselben glatten Marken wie die Preisbeschriftung.
+        // Im Log-Modus bleibt die logarithmische Teilung.
+        let plot_w = vp.plot_width();
         let grid_prices: Vec<f64> = if vp.log_scale {
-            vp.log_grid_prices(num_lines)
+            vp.log_grid_prices(10)
         } else {
-            let price_step = (vp.price.max - vp.price.min) / num_lines as f64;
-            (0..=num_lines)
-                .map(|i| vp.price.min + i as f64 * price_step)
-                .collect()
+            ticks::price_ticks(vp.price.min, vp.price.max, TARGET_INTERVALS).values
         };
 
         for price in &grid_prices {
             let y = vp.price_to_y(*price);
-            renderer.draw_line(0.0, y, vp.dimensions.width as f64, y, grid_color, 1.0);
+            renderer.draw_line(0.0, y, plot_w, y, grid_color, 1.0);
         }
 
         // Vertikale Gitterlinien stehen an denselben Kalendersprüngen wie die
@@ -238,13 +245,21 @@ pub fn render_chart(state: &mut ChartState, extras: &RenderExtras, renderer: &mu
         for tick in crate::core::time_axis::axis_ticks(
             vp.bar_index(),
             vp.bars(),
-            vp.dimensions.width as f64,
+            vp.plot_width(),
             vp.timezone_offset_minutes,
             AXIS_LABEL_WIDTH_PX,
         ) {
             let x = vp.time_to_x(tick.time);
             renderer.draw_line(x, 0.0, x, vp.dimensions.height as f64, grid_color, 1.0);
         }
+    }
+
+    // Kerzen und Volumen bleiben im Hauptbereich: Pane-Hintergründe und Achsen
+    // überdecken sonst, was darüber hinausragt.
+    renderer.set_clip(0.0, 0.0, state.viewport.plot_width(), main_height);
+
+    if state.options.show_volume {
+        render_volume(state, renderer, main_height);
     }
 
     // Draw candles with TradingView-style optimal width calculation
@@ -410,13 +425,15 @@ pub fn render_chart(state: &mut ChartState, extras: &RenderExtras, renderer: &mu
         }
     }
 
+    renderer.clear_clip();
+
     // Draw session markers (rendered behind candles — drawn before tools)
     if state.options.show_sessions && !state.options.sessions.is_empty() {
         let vp = &state.viewport;
         let tf_secs = state.timeframe.duration_secs();
         // Only show session markers for timeframes <= 1h (3600s)
         if tf_secs <= 3600 {
-            let chart_width = vp.dimensions.width as f64;
+            let chart_width = vp.plot_width();
             let chart_height = vp.dimensions.height as f64;
             let visible_time = vp.time_range();
             let time_start = visible_time.start.get();
@@ -475,12 +492,7 @@ pub fn render_chart(state: &mut ChartState, extras: &RenderExtras, renderer: &mu
 
     // Draw comparison symbols as percent-performance overlays with their
     // own right-side scale.
-    renderer.set_clip(
-        0.0,
-        0.0,
-        state.viewport.dimensions.width as f64,
-        main_height,
-    );
+    renderer.set_clip(0.0, 0.0, state.viewport.plot_width(), main_height);
     render_overlay_indicators(indicator_panes, state, renderer);
 
     if draw_indicator_artifacts {
@@ -506,19 +518,14 @@ pub fn render_chart(state: &mut ChartState, extras: &RenderExtras, renderer: &mu
         let vp = &state.viewport;
         let tools = state.tool_manager.tools();
 
-        renderer.set_clip(0.0, 0.0, vp.dimensions.width as f64, main_height);
+        renderer.set_clip(0.0, 0.0, vp.plot_width(), main_height);
         for tool in tools {
             tool.render(renderer, vp);
         }
         renderer.clear_clip();
     }
 
-    renderer.set_clip(
-        0.0,
-        0.0,
-        state.viewport.dimensions.width as f64,
-        main_height,
-    );
+    renderer.set_clip(0.0, 0.0, state.viewport.plot_width(), main_height);
     render_selected_tool_highlights(state, renderer);
     renderer.clear_clip();
 
@@ -528,13 +535,21 @@ pub fn render_chart(state: &mut ChartState, extras: &RenderExtras, renderer: &mu
         let color = state.options.crosshair_color;
         let vp = &state.viewport;
 
-        // Set line cap to butt for crisp crosshair lines (TradingView style)
-
-        // Vertical line - use optimized method
-        renderer.draw_vertical_line(crosshair.x, 0.0, vp.dimensions.height as f64, &color, 1.0);
-
-        // Horizontal line - use optimized method
-        renderer.draw_horizontal_line(crosshair.y, 0.0, vp.dimensions.width as f64, &color, 1.0);
+        // Das Fadenkreuz rastet auf der Kerze unter dem Zeiger ein: die Ablesung
+        // gehört zu einer Kerze, nicht zu einem Pixel dazwischen.
+        let x = if vp.bar_count() > 0 {
+            let bar = vp.x_to_bar(crosshair.x).round();
+            vp.bar_to_x(bar.clamp(0.0, vp.bar_count() as f64 - 1.0))
+        } else {
+            crosshair.x
+        };
+        let plot_w = vp.plot_width();
+        if x >= 0.0 && x <= plot_w {
+            renderer.draw_vertical_line(x, 0.0, vp.dimensions.height as f64, &color, 1.0);
+        }
+        if crosshair.x <= plot_w {
+            renderer.draw_horizontal_line(crosshair.y, 0.0, plot_w, &color, 1.0);
+        }
     }
 
     render_axes(state, indicator_panes, renderer);
@@ -665,6 +680,46 @@ fn render_compare_symbols(
                 crate::rendering::TextBaseline::Top,
             );
         }
+    }
+}
+
+/// Breite eines Kerzenkörpers in CSS-Pixeln — dieselbe für Kerzen und Volumen.
+fn body_width_css(vp: &crate::core::viewport::Viewport) -> f64 {
+    use crate::utils::bar_width::{optimal_candlestick_width, symmetric_bar_width};
+    let pixel_ratio = vp.dimensions.pixel_ratio;
+    let bar_spacing = vp.bar_width();
+    let optimal = if vp.bar_width_ratio > 0.0 {
+        bar_spacing * pixel_ratio * vp.bar_width_ratio
+    } else {
+        optimal_candlestick_width(bar_spacing, pixel_ratio)
+    };
+    let (width, _) = symmetric_bar_width(optimal, pixel_ratio, false);
+    width / pixel_ratio
+}
+
+/// Volumen als Histogramm im unteren Teil der Preis-Pane, ab null, gedämpft.
+///
+/// Es zeichnet, was in den Kerzen steht. Ob dieses Volumen echt ist, entscheidet der
+/// Aufrufer: er schaltet `show_volume` nur dort ein, wo eine echte Quelle vorliegt.
+fn render_volume(state: &ChartState, renderer: &mut dyn Renderer, main_height: f64) {
+    let vp = &state.viewport;
+    let visible = state.visible_candles();
+    let max_volume = visible.iter().map(|c| c.v).fold(0.0_f64, f64::max);
+    if max_volume.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater) {
+        return;
+    }
+    let band = main_height * VOLUME_BAND_SHARE;
+    let width = body_width_css(vp).max(1.0);
+    let up = state.options.bullish_color.with_alpha(0.3);
+    let down = state.options.bearish_color.with_alpha(0.3);
+    for candle in visible {
+        if candle.v <= 0.0 || !candle.v.is_finite() {
+            continue;
+        }
+        let height = candle.v / max_volume * band;
+        let x = vp.time_to_x(candle.time) - width / 2.0;
+        let color = if candle.c >= candle.o { up } else { down };
+        renderer.fill_rect(x, main_height - height, width, height, color);
     }
 }
 
@@ -874,7 +929,6 @@ fn render_indicator_panes(
     let indicator_total = pane_height_total(indicator_panes);
     let mut top = height * (1.0 - indicator_total).max(0.38);
     let bg = state.options.background_color.with_alpha(1.0);
-    let border = state.options.grid_color.with_alpha(0.8);
     let text = state.options.text_color.with_alpha(0.82);
 
     // Price axis column width — oscillator content stops here, scale labels go here.
@@ -887,20 +941,12 @@ fn render_indicator_panes(
     {
         let pane_h = (height * pane.height_fraction).max(56.0);
 
-        // Pane background: only the content area (not the price-axis column)
+        // Pane und Achsenspalte deckend, ohne Trennlinien: Abstand und Titel genügen.
         renderer.fill_rect(0.0, top, content_w, pane_h, bg);
-        // Price-axis column background for this pane
-        renderer.fill_rect(
-            content_w,
-            top,
-            price_axis_w,
-            pane_h,
-            state.options.background_color.with_alpha(0.82),
-        );
-        // Top border across full width
-        renderer.draw_line(0.0, top, width, top, border, 1.0);
-        // Separator between content and scale column
-        renderer.draw_line(content_w, top, content_w, top + pane_h, border, 1.0);
+        renderer.fill_rect(content_w, top, price_axis_w, pane_h, bg);
+        // Der Titel steht über dem Pane; darunter beginnt die Zeichenfläche.
+        let plot_top = top + PANE_TITLE_BAND_PX;
+        let plot_h = (pane_h - PANE_TITLE_BAND_PX).max(24.0);
 
         // Alle Linien des Indikators, auf eine gemeinsame Skala gebracht.
         let visible_time = vp.time_range();
@@ -942,7 +988,7 @@ fn render_indicator_panes(
             min_v -= pad;
             max_v += pad;
             let span = (max_v - min_v).max(1.0);
-            let value_to_y = |value: f64| top + pane_h - ((value - min_v) / span) * pane_h;
+            let value_to_y = |value: f64| plot_top + plot_h - ((value - min_v) / span) * plot_h;
 
             for (index, line) in lines.iter().enumerate() {
                 let points: Vec<(f64, f64)> = line
@@ -958,17 +1004,17 @@ fn render_indicator_panes(
                 }
             }
 
-            // Scale labels in the price-axis column (right 64px)
-            for i in 0..=2 {
-                let value = min_v + span * i as f64 / 2.0;
-                let y = value_to_y(value);
+            // Gitter und Beschriftung auf glatten Marken des Panes.
+            let pane_ticks = ticks::price_ticks(min_v, max_v, (plot_h / 40.0).clamp(2.0, 4.0));
+            for value in &pane_ticks.values {
+                let y = value_to_y(*value);
                 renderer.draw_line(0.0, y, content_w, y, state.options.grid_color, 1.0);
                 renderer.draw_text(
-                    &format!("{:.1}", value),
-                    width - 4.0,
+                    &ticks::format_price(*value, pane_ticks.decimals),
+                    width - 6.0,
                     y,
                     text,
-                    9.0,
+                    LABEL_FONT_PX,
                     crate::rendering::TextAlign::Right,
                     crate::rendering::TextBaseline::Middle,
                 );
@@ -978,9 +1024,9 @@ fn render_indicator_panes(
         renderer.draw_text(
             &pane.indicator_id.to_uppercase(),
             8.0,
-            top + 6.0,
+            top + 4.0,
             text,
-            10.0,
+            LABEL_FONT_PX,
             crate::rendering::TextAlign::Left,
             crate::rendering::TextBaseline::Top,
         );
@@ -993,62 +1039,69 @@ fn render_axes(state: &ChartState, indicator_panes: &[IndicatorPane], renderer: 
     let width = vp.dimensions.width as f64;
     let height = vp.dimensions.height as f64;
     let main_height = main_chart_height(indicator_panes, height);
-    let axis_color = state.options.text_color.with_alpha(0.78);
-    let bg = state.options.background_color.with_alpha(0.82);
-    let grid = state.options.grid_color.with_alpha(0.85);
+    let axis_color = state.options.text_color.with_alpha(0.7);
+    // Die Achsenspalten sind deckend: der Datenbereich endet vor ihnen.
+    let bg = state.options.background_color.with_alpha(1.0);
 
     let price_axis_w = PRICE_AXIS_WIDTH_PX;
     let time_axis_h = TIME_AXIS_HEIGHT_PX;
     renderer.fill_rect(width - price_axis_w, 0.0, price_axis_w, main_height, bg);
     renderer.fill_rect(0.0, height - time_axis_h, width, time_axis_h, bg);
-    renderer.draw_line(
-        width - price_axis_w,
-        0.0,
-        width - price_axis_w,
-        main_height,
-        grid,
-        1.0,
-    );
-    renderer.draw_line(
-        0.0,
-        height - time_axis_h,
-        width,
-        height - time_axis_h,
-        grid,
-        1.0,
-    );
 
-    let price_lines = 6;
-    let price_step = (vp.price.max - vp.price.min) / price_lines as f64;
-    for i in 0..=price_lines {
-        let price = vp.price.min + price_step * i as f64;
-        let y = (vp.price.max - price) / (vp.price.max - vp.price.min) * main_height;
-        if y < 0.0 || y > main_height {
-            continue;
+    // Preismarken: glatte Schritte, gleich viele Nachkommastellen, und bei zu
+    // dichter Lage nur jede n-te beschriftet — das Gitter bleibt an allen.
+    let (min, max) = (vp.price.min, vp.price.max);
+    if max > min {
+        let (values, decimals): (Vec<f64>, usize) = if vp.log_scale {
+            let step = ticks::nice_step(max - min, TARGET_INTERVALS);
+            (vp.log_grid_prices(6), ticks::step_decimals(step))
+        } else {
+            let t = ticks::price_ticks(min, max, TARGET_INTERVALS);
+            (t.values, t.decimals)
+        };
+        let price_y = |price: f64| {
+            if vp.log_scale {
+                let (lo, hi) = (min.max(1e-10).ln(), max.max(1e-10).ln());
+                (hi - price.max(1e-10).ln()) / (hi - lo) * main_height
+            } else {
+                (max - price) / (max - min) * main_height
+            }
+        };
+        let gap = match values.as_slice() {
+            [a, b, ..] => (price_y(*a) - price_y(*b)).abs(),
+            _ => 0.0,
+        };
+        let stride = ticks::label_stride(gap, MIN_LABEL_GAP_PX).max(1);
+        for (index, price) in values.iter().enumerate() {
+            let y = price_y(*price);
+            if index % stride != 0 || y < 0.0 || y > main_height {
+                continue;
+            }
+            renderer.draw_text(
+                &ticks::format_price(*price, decimals),
+                width - 6.0,
+                y,
+                axis_color,
+                LABEL_FONT_PX,
+                crate::rendering::TextAlign::Right,
+                crate::rendering::TextBaseline::Middle,
+            );
         }
-        renderer.draw_text(
-            &format!("{:.2}", price),
-            width - 4.0,
-            y,
-            axis_color,
-            10.0,
-            crate::rendering::TextAlign::Right,
-            crate::rendering::TextBaseline::Middle,
-        );
     }
 
     // Ticks stehen an Bars mit Kalendersprung. In gleichen Zeitabständen ginge
     // es auf der Bar-Achse nicht mehr: zwischen zwei benachbarten Bars können
     // fünf Minuten oder ein Wochenende liegen.
+    let plot_w = vp.plot_width();
     for tick in crate::core::time_axis::axis_ticks(
         vp.bar_index(),
         vp.bars(),
-        width - price_axis_w,
+        plot_w,
         vp.timezone_offset_minutes,
         AXIS_LABEL_WIDTH_PX,
     ) {
         let x = vp.time_to_x(tick.time);
-        if x < 0.0 || x > width - price_axis_w {
+        if x < 0.0 || x > plot_w {
             continue;
         }
         renderer.draw_text(
@@ -1056,7 +1109,7 @@ fn render_axes(state: &ChartState, indicator_panes: &[IndicatorPane], renderer: 
             x,
             height - 4.0,
             axis_color,
-            10.0,
+            LABEL_FONT_PX,
             crate::rendering::TextAlign::Center,
             crate::rendering::TextBaseline::Bottom,
         );
