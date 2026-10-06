@@ -238,6 +238,9 @@ export async function createChart(canvas, options = {}) {
     indicators: {
       /** Namen aller Indikatoren aus `kestrel-chartkit`. */
       available: () => parse(WasmChart.availableIndicators(), []),
+      /** Eigenes Pane (`true`) oder Overlay auf dem Preis (`false`)? */
+      hasOwnPane: (name) => WasmChart.indicatorHasOwnPane(name),
+      /** Gibt die Pane-ID zurück; ein Overlay auf dem Preis liefert `''`. */
       add: (name, params = {}) => chart.addIndicatorPane(name, JSON.stringify(params)),
       remove: (paneId) => chart.removePane(paneId),
       height: (paneId, fraction) => chart.setPaneHeightFraction(paneId, fraction),

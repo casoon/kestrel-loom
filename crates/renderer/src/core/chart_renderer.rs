@@ -39,6 +39,11 @@ impl IndicatorPane {
         self.series.placement()
     }
 
+    /// Belegt dieser Indikator eigene Höhe? Overlays liegen auf dem Preischart.
+    pub fn has_own_pane(&self) -> bool {
+        self.placement() == IndicatorPlacement::Pane
+    }
+
     /// Legt ein Pane für einen Indikator aus dem Chartkit-Katalog an.
     pub fn new(
         pane_id: impl Into<String>,
@@ -663,13 +668,18 @@ fn render_compare_symbols(
     }
 }
 
-fn main_chart_height(indicator_panes: &[IndicatorPane], height: f64) -> f64 {
-    // Overlays liegen auf dem Preischart und kosten keine eigene Höhe.
-    let indicator_total: f64 = indicator_panes
+/// Höhenanteil aller Indikatoren mit eigenem Pane. Overlays zählen nicht mit —
+/// sie liegen auf dem Preischart und kosten keine Höhe.
+pub fn pane_height_total(indicator_panes: &[IndicatorPane]) -> f64 {
+    indicator_panes
         .iter()
-        .filter(|pane| pane.placement() == IndicatorPlacement::Pane)
+        .filter(|pane| pane.has_own_pane())
         .map(|pane| pane.height_fraction)
-        .sum();
+        .sum()
+}
+
+fn main_chart_height(indicator_panes: &[IndicatorPane], height: f64) -> f64 {
+    let indicator_total = pane_height_total(indicator_panes);
     if indicator_total <= 0.0 {
         return height;
     }
@@ -861,10 +871,7 @@ fn render_indicator_panes(
     let vp = &state.viewport;
     let width = vp.dimensions.width as f64;
     let height = vp.dimensions.height as f64;
-    let indicator_total: f64 = indicator_panes
-        .iter()
-        .map(|pane| pane.height_fraction)
-        .sum();
+    let indicator_total = pane_height_total(indicator_panes);
     let mut top = height * (1.0 - indicator_total).max(0.38);
     let bg = state.options.background_color.with_alpha(1.0);
     let border = state.options.grid_color.with_alpha(0.8);

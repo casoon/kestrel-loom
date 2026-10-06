@@ -36,8 +36,8 @@ pub use candle_buffer::CandleBuffer;
 pub use candle_lifecycle::{CandleEvent, CandleStore};
 pub use chart::Chart;
 pub use chart_renderer::{
-    render_chart, scene_from_indicator_panes, update_indicator_panes, CompareSymbol, IndicatorPane,
-    RenderExtras,
+    pane_height_total, render_chart, scene_from_indicator_panes, update_indicator_panes,
+    CompareSymbol, IndicatorPane, RenderExtras,
 };
 pub use chart_state::{ChartOptions, ChartState, CrosshairState, InteractionState, MagnetMode};
 pub use config::ChartConfig;

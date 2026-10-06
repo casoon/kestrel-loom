@@ -14,7 +14,8 @@ use kestrel_loom::core::{
 
 use crate::canvas2d::Canvas2DRenderer;
 use kestrel_loom::core::{
-    render_chart, update_indicator_panes, CompareSymbol, IndicatorPane, RenderExtras,
+    pane_height_total, render_chart, update_indicator_panes, CompareSymbol, IndicatorPane,
+    RenderExtras,
 };
 
 /// Main WASM Chart instance that can be controlled from JavaScript
@@ -1071,7 +1072,8 @@ impl WasmChart {
         serde_json::to_string(&self.state.selected_tools).unwrap_or_else(|_| "[]".to_string())
     }
 
-    /// Create or replace an indicator pane. Returns the pane ID.
+    /// Create or replace an indicator. Returns the pane ID, or an empty string
+    /// when the indicator is drawn over the price chart and has no pane of its own.
     #[wasm_bindgen(js_name = addIndicatorPane)]
     pub fn add_indicator_pane(
         &mut self,
@@ -1095,17 +1097,19 @@ impl WasmChart {
                 pane.height_fraction,
             )
             .map_err(|e| JsValue::from_str(&e))?;
+            let own_pane = replacement.has_own_pane();
             *pane = replacement;
             self.state.mark_dirty();
-            return Ok(pane_id);
+            return Ok(if own_pane { pane_id } else { String::new() });
         }
 
         let pane = IndicatorPane::new(pane_id.clone(), indicator_id, params, 0.28)
             .map_err(|e| JsValue::from_str(&e))?;
+        let own_pane = pane.has_own_pane();
         self.indicator_panes.push(pane);
         self.normalize_indicator_panes();
         self.state.mark_dirty();
-        Ok(pane_id)
+        Ok(if own_pane { pane_id } else { String::new() })
     }
 
     /// Zeichnet die Artefakte der aktiven Indikatoren mit — Zonen, Pivots, Profile.
@@ -1141,6 +1145,13 @@ impl WasmChart {
     pub fn available_indicators() -> String {
         serde_json::to_string(&kestrel_loom::core::IndicatorSeries::available())
             .unwrap_or_else(|_| "[]".to_string())
+    }
+
+    /// Bekommt der Indikator ein eigenes Pane (`true`) oder liegt er auf dem
+    /// Preischart (`false`)? Damit lässt sich die Chart-Höhe vor dem Anlegen festlegen.
+    #[wasm_bindgen(js_name = indicatorHasOwnPane)]
+    pub fn indicator_has_own_pane(name: &str) -> bool {
+        kestrel_loom::core::placement_for(name) == kestrel_loom::core::IndicatorPlacement::Pane
     }
 
     /// Remove an indicator pane by pane ID.
@@ -1182,37 +1193,38 @@ impl WasmChart {
             return;
         }
         let max_indicator_total = 0.62_f64;
-        let total: f64 = self
-            .indicator_panes
-            .iter()
-            .map(|pane| pane.height_fraction)
-            .sum();
+        let total = pane_height_total(&self.indicator_panes);
         if total <= max_indicator_total {
             return;
         }
-        for pane in &mut self.indicator_panes {
+        for pane in self
+            .indicator_panes
+            .iter_mut()
+            .filter(|pane| pane.has_own_pane())
+        {
             pane.height_fraction = pane.height_fraction / total * max_indicator_total;
         }
     }
 
     fn pane_layout_json(&self) -> Vec<serde_json::Value> {
-        let indicator_total: f64 = self
-            .indicator_panes
-            .iter()
-            .map(|pane| pane.height_fraction)
-            .sum();
+        let indicator_total = pane_height_total(&self.indicator_panes);
         let mut panes = vec![serde_json::json!({
             "id": "main",
             "indicatorId": "price",
             "heightFraction": (1.0 - indicator_total).max(0.38),
         })];
-        panes.extend(self.indicator_panes.iter().map(|pane| {
-            serde_json::json!({
-                "id": pane.pane_id,
-                "indicatorId": pane.indicator_id,
-                "heightFraction": pane.height_fraction,
-            })
-        }));
+        panes.extend(
+            self.indicator_panes
+                .iter()
+                .filter(|pane| pane.has_own_pane())
+                .map(|pane| {
+                    serde_json::json!({
+                        "id": pane.pane_id,
+                        "indicatorId": pane.indicator_id,
+                        "heightFraction": pane.height_fraction,
+                    })
+                }),
+        );
         panes
     }
 

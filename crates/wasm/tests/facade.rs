@@ -217,6 +217,23 @@ fn an_unknown_indicator_is_refused_instead_of_ignored() {
 }
 
 #[wasm_bindgen_test]
+fn an_overlay_has_no_pane_and_costs_no_height() {
+    let mut chart = chart_with_data(60);
+    assert!(WasmChart::indicator_has_own_pane("rsi"));
+    assert!(!WasmChart::indicator_has_own_pane("ema"));
+    assert_eq!(chart.add_indicator_pane("ema", "{}").unwrap(), "");
+    assert_eq!(chart.add_indicator_pane("rsi", "{}").unwrap(), "pane-rsi");
+    let layout: serde_json::Value = serde_json::from_str(&chart.get_pane_layout()).unwrap();
+    let ids: Vec<_> = layout
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| p["id"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(ids, ["main", "pane-rsi"], "Overlay taucht im Pane-Layout nicht auf");
+}
+
+#[wasm_bindgen_test]
 fn indicator_parameters_must_be_numbers() {
     let mut chart = chart_with_data(60);
     assert!(chart.add_indicator_pane("rsi", "{\"rsi_len\": 21}").is_ok());
