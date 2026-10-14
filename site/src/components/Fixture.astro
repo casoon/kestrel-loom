@@ -1,0 +1,31 @@
+---
+import { CodeBlock } from '@casoon/pages-theme/components';
+
+// The golden fixtures of the core: one committed RenderCommand stream per scene,
+// compared by `cargo test -p kestrel-loom --test golden_render_commands`.
+const fixtures = import.meta.glob<string>('../../../crates/renderer/tests/fixtures/*.txt', {
+  query: '?raw',
+  import: 'default',
+  eager: true,
+});
+
+interface Props {
+  /** File name in crates/renderer/tests/fixtures/ without .txt */
+  name: string;
+  /** Number of leading lines to show */
+  lines: number;
+}
+
+const { name, lines } = Astro.props;
+const text = fixtures[`../../../crates/renderer/tests/fixtures/${name}.txt`];
+if (text === undefined) throw new Error(`fixture ${name} not found`);
+const total = text.trimEnd().split('\n').length;
+const code = text.split('\n').slice(0, lines).join('\n');
+---
+
+<CodeBlock
+  code={code}
+  title={`crates/renderer/tests/fixtures/${name}.txt`}
+  label={`first ${lines} of ${total} commands`}
+  copy={false}
+/>

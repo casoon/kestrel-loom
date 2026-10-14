@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "type": "flow",
+  "title": "From your page to the canvas",
+  "description": "Your page hands candles and input to the JavaScript wrapper. Through the WebAssembly façade they reach the Rust core, which keeps chart state, viewport and tools and takes its indicators from kestrel-chartkit. A render pass produces drawing commands, and the WASM crate executes them on a Canvas 2D context.",
+  "source": "README.md (Layout), crates/renderer, crates/wasm, js/kestrel-loom.js",
+  "width": 1160,
+  "height": 240,
+  "flow": {
+    "nodes": [
+      { "id": "page", "label": "Your page", "sublabel": "candles, mouse, touch", "kind": "io" },
+      { "id": "js", "label": "kestrel-loom.js", "sublabel": "wrapper you embed" },
+      { "id": "core", "label": "kestrel-loom", "sublabel": "Rust core, no browser API" },
+      { "id": "chartkit", "label": "kestrel-chartkit", "sublabel": "indicator math", "kind": "external" },
+      { "id": "wasm", "label": "kestrel-loom-wasm", "sublabel": "Canvas 2D execution" },
+      { "id": "canvas", "label": "<canvas>", "sublabel": "the chart", "kind": "io" }
+    ],
+    "edges": [
+      { "from": "page", "to": "js" },
+      { "from": "js", "to": "core", "label": "WASM façade" },
+      { "from": "chartkit", "to": "core", "label": "on_bar" },
+      { "from": "core", "to": "wasm", "label": "RenderCommands" },
+      { "from": "wasm", "to": "canvas" }
+    ],
+    "mainPath": ["page", "js", "core", "wasm", "canvas"],
+    "orientation": "landscape"
+  }
+}

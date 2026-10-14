@@ -13,6 +13,8 @@ crates/wasm/       kestrel-loom-wasm   wasm-bindgen façade + Canvas 2D executio
 js/                kestrel-loom.js     grouped JavaScript wrapper — what you embed
 ```
 
+<Diagram name="flow" />
+
 A render pass in the core writes `RenderCommand`s — lines, rectangles, text, candles,
 indicator lines — into a renderer. The WASM crate executes them on a
 `CanvasRenderingContext2d`; in tests, a recorder collects them instead.
@@ -34,6 +36,11 @@ full_frame_with_bollinger_overlay.txt
 full_frame_with_rsi_pane.txt
 tools_trend_and_level.txt
 ```
+
+The start of the frame with an RSI pane: the canvas is cleared, the grid drawn, then each
+candle follows as a wick line and a body rectangle, all with exact coordinates.
+
+<Fixture name="full_frame_with_rsi_pane" lines={24} />
 
 A change in drawing behaviour fails the test even when the result still looks plausible in a
 browser. The fixtures are rewritten only on purpose:

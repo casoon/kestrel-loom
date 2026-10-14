@@ -19,6 +19,7 @@ export default defineConfig({
       // The chart only shows what it is once it moves, so a live demo takes the
       // place a build-time showcase holds for other projects.
       demo: 'Demo',
+      mdxComponents: './src/mdx-components.ts',
       showcase: false,
       // No CHANGELOG.md and no release notes yet.
       changelog: false,
