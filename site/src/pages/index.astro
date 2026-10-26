@@ -1,0 +1,201 @@
+---
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import {
+  Badge,
+  Badges,
+  Button,
+  CodeBlock,
+  Facts,
+  Features,
+  Hero,
+  Install,
+  Quickstart,
+} from '@casoon/pages-theme/components';
+import Base from '@casoon/pages-theme/layouts/Base.astro';
+import { url } from '@casoon/pages-theme/url';
+import demoDark from '../assets/demo-dark.webp';
+import demoLight from '../assets/demo-light.webp';
+import Diagram from '../components/Diagram.astro';
+
+// The golden fixtures of the core (see docs/concepts/architecture.mdx); only counted here.
+const fixtures = import.meta.glob('../../../crates/renderer/tests/fixtures/*.txt');
+
+// The indicator catalogue as the WASM build reports it — the same package the demo
+// loads, built by ./build-wasm.sh before the site (see scripts/demo-assets.mjs).
+const pkg = join(process.cwd(), '..', 'pkg');
+const wasm = await import(/* @vite-ignore */ pathToFileURL(join(pkg, 'kestrel_loom_wasm.js')).href);
+wasm.initSync({ module: readFileSync(join(pkg, 'kestrel_loom_wasm_bg.wasm')) });
+const indicatorCount = (JSON.parse(wasm.WasmChart.availableIndicators()) as string[]).length;
+
+const embedJs = `import { createChart } from './js/kestrel-loom.js';
+
+const chart = await createChart(canvas, { timeframe: '5m' });
+chart.data.set(candles);  // { time, o, h, l, c, v }
+chart.view.fit();
+chart.indicators.add('rsi');`;
+
+// Captured from the demo page of this site (Bollinger Bands and RSI added, 2026-10-14).
+const shotAlt =
+  'The kestrel-loom demo: synthetic five-minute candles with Bollinger Bands drawn over the price, an RSI pane below and a time axis with a scrollbar.';
+---
+
+<Base>
+  <Hero
+    title="Trading charts in the browser, drawn by Rust."
+    lead="kestrel-loom puts an interactive candlestick chart on a canvas: zoom, pan, indicators, drawing tools. For web and desktop apps that show market data and would rather embed a chart than build one."
+  >
+    <Install
+      commands={[
+        {
+          label: 'build',
+          command:
+            'git clone https://github.com/casoon/kestrel-loom && cd kestrel-loom && ./build-wasm.sh',
+        },
+      ]}
+    />
+    <Badges>
+      <Badge>BUSL-1.1</Badge>
+      <Badge tone="brand">alpha</Badge>
+      <Badge>v0.1.0</Badge>
+      <Badge>not on crates.io / npm</Badge>
+    </Badges>
+    <p class="demo-link">
+      <Button href={url('demo/')}>Open the live demo</Button>
+    </p>
+    <a slot="output" class="shot" href={url('demo/')}>
+      <img
+        class="shot-light"
+        src={demoLight.src}
+        width={demoLight.width}
+        height={demoLight.height}
+        alt={shotAlt}
+      />
+      <img
+        class="shot-dark"
+        src={demoDark.src}
+        width={demoDark.width}
+        height={demoDark.height}
+        alt={shotAlt}
+      />
+    </a>
+  </Hero>
+
+  <Facts
+    items={[
+      { value: String(indicatorCount), label: 'indicators from kestrel-chartkit, reported by the WASM build' },
+      { value: '8', label: 'chart types, from candlestick to Renko and footprint' },
+      { value: '7', label: 'drawing tools, with snapping and undo/redo' },
+      { value: String(Object.keys(fixtures).length), label: 'scenes compared command by command in the tests' },
+    ]}
+  />
+
+  <Features
+    items={[
+      {
+        title: 'Every indicator, live',
+        body: 'All indicators of kestrel-chartkit, updated bar by bar as new data arrives. Bands and averages draw over the price, oscillators such as RSI or MACD get their own pane.',
+      },
+      {
+        title: 'Weekends without gaps',
+        body: 'Bars sit side by side, so a trading pause over the weekend takes the width of one bar instead of two empty days.',
+      },
+      {
+        title: 'Feels right under the fingers',
+        body: 'Mouse wheel, trackpad and pinch are told apart: smooth zoom, panning in both directions, a glide after you let go, and a time scrollbar to grab.',
+      },
+      {
+        title: 'One file to embed',
+        body: 'A small JavaScript wrapper takes a canvas and handles sizing, input and redrawing. The chart only draws when something changed.',
+      },
+    ]}
+  />
+
+  <section class="how">
+    <h2>How it works</h2>
+    <p>
+      The chart lives in plain Rust: state, viewport, panes, tools and the render loop. That core
+      knows no browser; it writes drawing commands, and a thin WebAssembly layer carries them out
+      on the canvas. The indicator math comes from{' '}
+      <a href="https://casoon.github.io/kestrel-chartkit/">kestrel-chartkit</a>, so neither project
+      maintains the other's half.
+    </p>
+    <Diagram name="flow" format="svg" narrow={{ width: 470, height: 760 }} />
+    <p class="links">
+      <Button href={url('docs/concepts/architecture/')} variant="secondary">Architecture</Button>
+      <Button href={url('docs/reference/api/')} variant="quiet">JavaScript API →</Button>
+    </p>
+  </section>
+
+  <Quickstart
+    lead="Build the WASM package from the repository, load the wrapper and hand it a canvas. The documentation covers data, indicators, tools and the Rust core."
+    steps={[
+      'Clone the repository and run <code>./build-wasm.sh</code>; it writes the package to <code>pkg/</code>.',
+      'Serve <code>js/</code> and <code>pkg/</code> next to each other and import <code>createChart</code>.',
+      'Set candles in Unix seconds, fit the view, add indicators and tools.',
+    ]}
+  >
+    <CodeBlock code={embedJs} lang="js" title="chart.js" label="JavaScript" />
+  </Quickstart>
+</Base>
+
+<style>
+  .demo-link {
+    margin: 20px 0 0;
+  }
+  .shot {
+    display: block;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  .shot img {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+  .shot-dark {
+    display: none !important;
+  }
+  :global(:root[data-theme='dark']) .shot-light {
+    display: none !important;
+  }
+  :global(:root[data-theme='dark']) .shot-dark {
+    display: block !important;
+  }
+  @media (prefers-color-scheme: dark) {
+    :global(:root:not([data-theme='light'])) .shot-light {
+      display: none !important;
+    }
+    :global(:root:not([data-theme='light'])) .shot-dark {
+      display: block !important;
+    }
+  }
+  .how {
+    max-width: var(--max);
+    margin: 0 auto;
+    padding: 0 24px 72px;
+  }
+  .how h2 {
+    margin: 0 0 14px;
+    color: var(--heading);
+    font-size: 30px;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+  }
+  .how > p {
+    max-width: 760px;
+    font-size: 15.5px;
+  }
+  .how > p a {
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+  .links {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px;
+  }
+</style>

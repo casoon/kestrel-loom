@@ -642,3 +642,373 @@ fn a_compare_bar_in_a_trading_break_sits_between_the_neighbours() {
         points[1].0
     );
 }
+
+// --- Ruhiger Chart: Achsen, Datenbereich, Volumen, Fadenkreuz ---
+
+fn frame(state: &mut ChartState, extras: &RenderExtras) -> Vec<RenderCommand> {
+    let mut r = BatchRenderer::new(800, 400);
+    render_chart(state, extras, &mut r);
+    r.commands().to_vec()
+}
+
+fn fitted(count: usize) -> ChartState {
+    let mut generator = CandleGenerator::new(GeneratorConfig::crypto().with_seed(7));
+    let mut state = ChartState::new(800, 400, Timeframe::M5);
+    state.set_candles(generator.generate(count));
+    state.fit_to_data();
+    state
+}
+
+#[test]
+fn the_price_grid_sits_on_the_labelled_ticks() {
+    let mut state = fitted(150);
+    let commands = frame(&mut state, &RenderExtras::default());
+
+    let label_ys: Vec<f64> = commands
+        .iter()
+        .filter_map(|c| match c {
+            // Preisbeschriftungen stehen in der Achsenspalte, rechts.
+            RenderCommand::Text { x, y, text, .. }
+                if *x > 700.0 && text.chars().next().is_some_and(|c| c.is_ascii_digit()) =>
+            {
+                Some(*y)
+            }
+            _ => None,
+        })
+        .collect();
+    let grid_ys: Vec<f64> = commands
+        .iter()
+        .filter_map(|c| match c {
+            RenderCommand::Line { y1, y2, x1, .. } if y1 == y2 && *x1 == 0.0 => Some(*y1),
+            _ => None,
+        })
+        .collect();
+
+    assert!(label_ys.len() >= 3, "es gibt Preisbeschriftungen");
+    for y in &label_ys {
+        assert!(
+            grid_ys.iter().any(|g| (g - y).abs() < 1e-6),
+            "zur Beschriftung bei y={y} gehört eine Gitterlinie"
+        );
+    }
+}
+
+#[test]
+fn every_price_label_has_the_same_number_of_decimals() {
+    let mut state = fitted(150);
+    let commands = frame(&mut state, &RenderExtras::default());
+    let decimals: Vec<usize> = commands
+        .iter()
+        .filter_map(|c| match c {
+            RenderCommand::Text { x, text, .. } if *x > 700.0 => {
+                Some(text.split('.').nth(1).map_or(0, str::len))
+            }
+            _ => None,
+        })
+        .collect();
+    assert!(decimals.windows(2).all(|w| w[0] == w[1]), "{decimals:?}");
+}
+
+#[test]
+fn the_data_ends_before_the_price_axis() {
+    let state = fitted(150);
+    let last = state.candles().last().unwrap().time;
+    let x = state.viewport.time_to_x(last);
+    assert!(
+        x < state.viewport.plot_width() && state.viewport.plot_width() <= 800.0 - 64.0,
+        "die jüngste Kerze (x={x}) liegt links der Achsenspalte"
+    );
+}
+
+#[test]
+fn the_grid_stops_at_the_axis_column() {
+    let mut state = fitted(150);
+    let commands = frame(&mut state, &RenderExtras::default());
+    for c in &commands {
+        if let RenderCommand::Line { x1, x2, y1, y2, .. } = c {
+            // Gitterlinien beginnen links außen; Doji-Körper und Ähnliches nicht.
+            if y1 == y2 && *x1 == 0.0 {
+                assert!(*x2 <= 800.0 - 64.0 + 1e-6, "Gitterlinie reicht bis {x2}");
+            }
+        }
+    }
+}
+
+fn wide_rects(commands: &[RenderCommand]) -> usize {
+    commands
+        .iter()
+        .filter(|c| matches!(c, RenderCommand::Rect { height, .. } if *height > 0.0))
+        .count()
+}
+
+#[test]
+fn volume_is_only_drawn_when_asked_for() {
+    let mut state = fitted(150);
+    let without = wide_rects(&frame(&mut state, &RenderExtras::default()));
+
+    state.options.show_volume = true;
+    state.mark_dirty();
+    let with = wide_rects(&frame(&mut state, &RenderExtras::default()));
+
+    assert!(
+        with > without + 50,
+        "Histogramm kommt hinzu ({without} → {with})"
+    );
+}
+
+#[test]
+fn zero_volume_draws_no_histogram() {
+    let mut state = fitted(150);
+    let candles: Vec<Candle> = state
+        .candles()
+        .iter()
+        .map(|c| Candle::new(c.time, c.o, c.h, c.l, c.c, 0.0))
+        .collect();
+    state.set_candles(candles);
+    state.options.show_volume = true;
+    let with = wide_rects(&frame(&mut state, &RenderExtras::default()));
+
+    state.options.show_volume = false;
+    state.mark_dirty();
+    let without = wide_rects(&frame(&mut state, &RenderExtras::default()));
+    assert_eq!(
+        with, without,
+        "ohne Volumen in den Kerzen gibt es nichts zu zeichnen"
+    );
+}
+
+#[test]
+fn the_crosshair_snaps_to_the_candle_under_the_pointer() {
+    let mut state = fitted(150);
+    state.update_crosshair(300.3, 120.0);
+    let commands = frame(&mut state, &RenderExtras::default());
+
+    // Das Fadenkreuz geht in die Befehle als senkrechte Linie ein, die nicht zum Gitter
+    // gehört: sie steht genau auf dem Mittelpunkt einer Kerze.
+    let candle_xs: Vec<f64> = state
+        .candles()
+        .iter()
+        .map(|c| state.viewport.time_to_x(c.time))
+        .collect();
+    let snapped = commands.iter().any(|c| match c {
+        RenderCommand::Line { x1, x2, y1, y2, .. } if x1 == x2 && y1 != y2 => {
+            candle_xs.iter().any(|cx| (cx - x1).abs() < 1e-6)
+        }
+        _ => false,
+    });
+    assert!(snapped, "eine senkrechte Linie steht auf einer Kerze");
+}
+
+#[test]
+fn an_overlay_does_not_move_the_panes() {
+    let mut generator = CandleGenerator::new(GeneratorConfig::crypto().with_seed(42));
+    let candles = generator.generate(100);
+
+    let rsi_title_y = |with_overlay: bool| {
+        let mut state = ChartState::new(800, 400, Timeframe::M5);
+        state.set_candles(candles.clone());
+        state.fit_to_data();
+        let mut panes = vec![IndicatorPane::new("rsi", "rsi", HashMap::new(), 0.28).unwrap()];
+        if with_overlay {
+            panes.push(IndicatorPane::new("b", "bollinger", HashMap::new(), 0.28).unwrap());
+        }
+        update_indicator_panes(&mut panes, state.candles());
+        let extras = RenderExtras {
+            indicator_panes: &panes,
+            ..Default::default()
+        };
+        frame(&mut state, &extras)
+            .iter()
+            .find_map(|c| match c {
+                RenderCommand::Text { text, y, .. } if text == "RSI" => Some(*y),
+                _ => None,
+            })
+            .expect("Pane-Titel")
+    };
+
+    assert_eq!(rsi_title_y(false), rsi_title_y(true));
+}
+
+// --- Skala mit Indikator-Panes ---
+
+fn scene_with(
+    objects: Vec<kestrel_chartkit::viz::scene::SceneObject>,
+) -> kestrel_chartkit::viz::scene::Scene {
+    use kestrel_chartkit::viz::scene::{Pane, Scene};
+    let mut pane = Pane::new("price", 1.0);
+    for object in objects {
+        pane.upsert_object(object);
+    }
+    let mut scene = Scene::new();
+    scene.upsert_pane(pane);
+    scene
+}
+
+/// Ein Pane verkleinert den Hauptbereich. Szenen und Overlays müssen über dieselbe
+/// Preisskala abgebildet werden wie die Kerzen — mit der vollen Zeichenhöhe lägen sie
+/// bei jedem Pane neben den Kerzen (so stand es bis 2026-10-06).
+#[test]
+fn a_scene_line_uses_the_same_price_scale_as_the_candles_when_a_pane_is_present() {
+    use kestrel_chartkit::viz::scene::{LineStyle, SceneObject, SceneObjectKind};
+
+    let mut generator = CandleGenerator::new(GeneratorConfig::crypto().with_seed(42));
+    let mut state = ChartState::new(800, 400, Timeframe::M5);
+    state.set_candles(generator.generate(100));
+    state.fit_to_data();
+
+    // Ein Preis, an dem das Gitter eine Linie hat: dort muss die Szenenlinie liegen.
+    let ticks = kestrel_loom::utils::ticks::price_ticks(
+        state.viewport.price.min,
+        state.viewport.price.max,
+        kestrel_loom::utils::ticks::TARGET_INTERVALS,
+    );
+    let price = ticks.values[ticks.values.len() / 2];
+    let (start, end) = (state.candles()[0].time, state.candles()[99].time);
+    let scene = scene_with(vec![SceneObject::new(
+        "line",
+        1,
+        1.0,
+        SceneObjectKind::Polyline {
+            points: vec![(start.get() as f64, price), (end.get() as f64, price)],
+            color: "#58a6ff".to_string(),
+            style: LineStyle::Solid,
+            width: 1.0,
+        },
+    )]);
+
+    let mut panes = vec![IndicatorPane::new("rsi", "rsi", HashMap::new(), 0.28).unwrap()];
+    update_indicator_panes(&mut panes, state.candles());
+    let extras = RenderExtras {
+        indicator_panes: &panes,
+        scene: Some(&scene),
+        ..Default::default()
+    };
+    let commands = frame(&mut state, &extras);
+
+    let line_y = commands
+        .iter()
+        .find_map(|c| match c {
+            RenderCommand::IndicatorLine { points, .. } if points.len() == 2 => Some(points[0].1),
+            _ => None,
+        })
+        .expect("Szenenlinie");
+    let grid_ys: Vec<f64> = commands
+        .iter()
+        .filter_map(|c| match c {
+            RenderCommand::Line { y1, y2, x1, .. } if y1 == y2 && *x1 == 0.0 => Some(*y1),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        grid_ys.iter().any(|g| (g - line_y).abs() < 1e-6),
+        "Szenenlinie bei y={line_y} liegt nicht auf der Gitterlinie desselben Preises ({grid_ys:?})"
+    );
+}
+
+#[test]
+fn zones_sit_behind_the_candles_and_labels_in_front() {
+    use kestrel_chartkit::viz::scene::{SceneObject, SceneObjectKind};
+
+    let mut state = fitted(120);
+    let (start, end) = (state.candles()[0].time, state.candles()[119].time);
+    let price = state.candles()[60].c;
+    let scene = scene_with(vec![
+        SceneObject::new(
+            "zone",
+            0,
+            0.2,
+            SceneObjectKind::BoundedBox {
+                x0: start.get() as f64,
+                y0: price - 0.0005,
+                x1: end.get() as f64,
+                y1: price + 0.0005,
+                fill_color: Some("#888888".to_string()),
+                border_color: None,
+            },
+        ),
+        SceneObject::new(
+            "label",
+            2,
+            1.0,
+            SceneObjectKind::Text {
+                x: start.get() as f64,
+                y: price,
+                content: "Niveau".to_string(),
+                color: "#ffffff".to_string(),
+            },
+        ),
+    ]);
+    let extras = RenderExtras {
+        scene: Some(&scene),
+        ..Default::default()
+    };
+    let commands = frame(&mut state, &extras);
+
+    let index_of = |pred: &dyn Fn(&RenderCommand) -> bool| commands.iter().position(pred).unwrap();
+    // Die Zone ist das einzige Rechteck, das fast die ganze Datenbreite füllt.
+    let zone = index_of(&|c| matches!(c, RenderCommand::Rect { width, .. } if *width > 300.0));
+    let first_body = index_of(&|c| matches!(c, RenderCommand::Rect { width, .. } if *width < 20.0));
+    let label = index_of(&|c| matches!(c, RenderCommand::Text { text, .. } if text == "Niveau"));
+    let last_body = commands
+        .iter()
+        .rposition(|c| matches!(c, RenderCommand::Rect { width, .. } if *width < 20.0))
+        .unwrap();
+
+    assert!(zone < first_body, "die Zone liegt hinter den Kerzen");
+    assert!(label > last_body, "die Beschriftung liegt vor den Kerzen");
+}
+
+/// Das Fadenkreuz liest den Preis, den die Kerzen an dieser Stelle zeigen — auch dann,
+/// wenn Indikator-Panes den Hauptbereich verkleinern. Bis 2026-10-06 rechnete es mit der
+/// vollen Zeichenhöhe und las neben den Kerzen ab.
+#[test]
+fn the_crosshair_price_matches_the_candles_when_a_pane_is_present() {
+    let mut state = fitted(100);
+    let mut panes = vec![IndicatorPane::new("rsi", "rsi", HashMap::new(), 0.28).unwrap()];
+    update_indicator_panes(&mut panes, state.candles());
+    let extras = RenderExtras {
+        indicator_panes: &panes,
+        ..Default::default()
+    };
+    let commands = frame(&mut state, &extras);
+
+    let close = state.candles()[50].c;
+    let y = state.viewport.price_to_y(close);
+    assert!(
+        state.viewport.pane_inset > 0.0 && y < 400.0 - state.viewport.pane_inset,
+        "die Kerze liegt im Hauptbereich"
+    );
+    assert!((state.viewport.y_to_price(y) - close).abs() < 1e-9);
+
+    // Die Skala **nach** dem Frame ist die, mit der der Frame gezeichnet hat: der Körper
+    // der 51. Kerze hat den Schlusskurs als Ober- oder Unterkante.
+    let x = state.viewport.time_to_x(state.candles()[50].time);
+    let on_edge = commands.iter().any(|c| match c {
+        RenderCommand::Rect {
+            x: rx,
+            y: ry,
+            width,
+            height,
+            ..
+        } if *width < 20.0 && (rx - x).abs() < 1.0 => {
+            (ry - y).abs() < 1e-6 || (ry + height - y).abs() < 1e-6
+        }
+        _ => false,
+    });
+    assert!(
+        on_edge,
+        "die gezeichnete Kerze liegt auf der Skala des Viewports"
+    );
+
+    // Und das Fadenkreuz selbst: Zeiger auf der Höhe des Schlusskurses → derselbe Preis.
+    state.update_crosshair(state.viewport.time_to_x(state.candles()[50].time), y);
+    assert!((state.crosshair.price - close).abs() < 1e-6);
+}
+
+#[test]
+fn without_panes_the_price_scale_covers_the_whole_height() {
+    let mut state = fitted(100);
+    let _ = frame(&mut state, &RenderExtras::default());
+    assert_eq!(state.viewport.pane_inset, 0.0);
+    assert_eq!(state.viewport.price_height(), 400.0);
+}

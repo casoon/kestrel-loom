@@ -14,7 +14,8 @@ use kestrel_loom::core::{
 
 use crate::canvas2d::Canvas2DRenderer;
 use kestrel_loom::core::{
-    render_chart, update_indicator_panes, CompareSymbol, IndicatorPane, RenderExtras,
+    pane_height_total, render_chart, update_indicator_panes, CompareSymbol, IndicatorPane,
+    RenderExtras,
 };
 
 /// Main WASM Chart instance that can be controlled from JavaScript
@@ -125,7 +126,7 @@ impl WasmChart {
         let mut buf = CandleBuffer::new();
         buf.snapshot(self.state.candles().to_vec());
         buf.append(&incoming);
-        self.state.set_candles(buf.candles().to_vec());
+        self.state.replace_candles_keep_view(buf.candles().to_vec());
         Ok(())
     }
 
@@ -144,7 +145,7 @@ impl WasmChart {
         let mut buf = CandleBuffer::new();
         buf.snapshot(self.state.candles().to_vec());
         buf.update_running(candle);
-        self.state.set_candles(buf.candles().to_vec());
+        self.state.replace_candles_keep_view(buf.candles().to_vec());
         Ok(())
     }
 
@@ -531,18 +532,39 @@ impl WasmChart {
     pub fn set_theme(&mut self, dark: bool) {
         use kestrel_loom::primitives::Color;
         let opts = &mut self.state.options;
+        // Ruhige Palette: neutrale Fläche, kontrastarmes Gitter, Auf/Ab in zwei
+        // Farben, die auch in Graustufen und bei Farbsehschwäche auseinanderliegen.
         if dark {
-            opts.background_color = Color::rgba(10, 14, 18, 1.0);
-            opts.grid_color = Color::rgba(45, 54, 64, 0.3);
-            opts.text_color = Color::rgba(231, 233, 234, 1.0);
-            opts.crosshair_color = Color::rgba(139, 152, 165, 0.5);
+            opts.background_color = Color::rgba(14, 19, 28, 1.0);
+            opts.grid_color = Color::rgba(42, 51, 66, 1.0);
+            opts.text_color = Color::rgba(232, 237, 246, 1.0);
+            opts.crosshair_color = Color::rgba(169, 180, 199, 0.7);
+            opts.bullish_color = Color::rgba(153, 246, 228, 1.0);
+            opts.bearish_color = Color::rgba(229, 72, 77, 1.0);
+            opts.unchanged_color = Color::rgba(169, 180, 199, 1.0);
         } else {
             opts.background_color = Color::rgba(255, 255, 255, 1.0);
-            opts.grid_color = Color::rgba(180, 180, 180, 0.3);
-            opts.text_color = Color::rgba(20, 20, 20, 1.0);
-            opts.crosshair_color = Color::rgba(80, 80, 80, 0.5);
+            opts.grid_color = Color::rgba(217, 222, 232, 1.0);
+            opts.text_color = Color::rgba(23, 32, 51, 1.0);
+            opts.crosshair_color = Color::rgba(102, 112, 133, 0.7);
+            opts.bullish_color = Color::rgba(10, 79, 73, 1.0);
+            opts.bearish_color = Color::rgba(208, 58, 15, 1.0);
+            opts.unchanged_color = Color::rgba(102, 112, 133, 1.0);
         }
         self.state.mark_dirty();
+    }
+
+    /// Volumen unten in der Preis-Pane ein- oder ausschalten. Aus ist der Standard:
+    /// der Aufrufer weiß, ob die Quelle echtes Börsenvolumen liefert; der Chart nicht.
+    #[wasm_bindgen(js_name = setShowVolume)]
+    pub fn set_show_volume(&mut self, show: bool) {
+        self.state.options.show_volume = show;
+        self.state.mark_dirty();
+    }
+
+    #[wasm_bindgen(js_name = getShowVolume)]
+    pub fn get_show_volume(&self) -> bool {
+        self.state.options.show_volume
     }
 
     /// Get crosshair position as JSON
@@ -1071,7 +1093,8 @@ impl WasmChart {
         serde_json::to_string(&self.state.selected_tools).unwrap_or_else(|_| "[]".to_string())
     }
 
-    /// Create or replace an indicator pane. Returns the pane ID.
+    /// Create or replace an indicator. Returns the pane ID, or an empty string
+    /// when the indicator is drawn over the price chart and has no pane of its own.
     #[wasm_bindgen(js_name = addIndicatorPane)]
     pub fn add_indicator_pane(
         &mut self,
@@ -1095,17 +1118,19 @@ impl WasmChart {
                 pane.height_fraction,
             )
             .map_err(|e| JsValue::from_str(&e))?;
+            let own_pane = replacement.has_own_pane();
             *pane = replacement;
             self.state.mark_dirty();
-            return Ok(pane_id);
+            return Ok(if own_pane { pane_id } else { String::new() });
         }
 
         let pane = IndicatorPane::new(pane_id.clone(), indicator_id, params, 0.28)
             .map_err(|e| JsValue::from_str(&e))?;
+        let own_pane = pane.has_own_pane();
         self.indicator_panes.push(pane);
         self.normalize_indicator_panes();
         self.state.mark_dirty();
-        Ok(pane_id)
+        Ok(if own_pane { pane_id } else { String::new() })
     }
 
     /// Zeichnet die Artefakte der aktiven Indikatoren mit — Zonen, Pivots, Profile.
@@ -1141,6 +1166,13 @@ impl WasmChart {
     pub fn available_indicators() -> String {
         serde_json::to_string(&kestrel_loom::core::IndicatorSeries::available())
             .unwrap_or_else(|_| "[]".to_string())
+    }
+
+    /// Bekommt der Indikator ein eigenes Pane (`true`) oder liegt er auf dem
+    /// Preischart (`false`)? Damit lässt sich die Chart-Höhe vor dem Anlegen festlegen.
+    #[wasm_bindgen(js_name = indicatorHasOwnPane)]
+    pub fn indicator_has_own_pane(name: &str) -> bool {
+        kestrel_loom::core::placement_for(name) == kestrel_loom::core::IndicatorPlacement::Pane
     }
 
     /// Remove an indicator pane by pane ID.
@@ -1182,37 +1214,38 @@ impl WasmChart {
             return;
         }
         let max_indicator_total = 0.62_f64;
-        let total: f64 = self
-            .indicator_panes
-            .iter()
-            .map(|pane| pane.height_fraction)
-            .sum();
+        let total = pane_height_total(&self.indicator_panes);
         if total <= max_indicator_total {
             return;
         }
-        for pane in &mut self.indicator_panes {
+        for pane in self
+            .indicator_panes
+            .iter_mut()
+            .filter(|pane| pane.has_own_pane())
+        {
             pane.height_fraction = pane.height_fraction / total * max_indicator_total;
         }
     }
 
     fn pane_layout_json(&self) -> Vec<serde_json::Value> {
-        let indicator_total: f64 = self
-            .indicator_panes
-            .iter()
-            .map(|pane| pane.height_fraction)
-            .sum();
+        let indicator_total = pane_height_total(&self.indicator_panes);
         let mut panes = vec![serde_json::json!({
             "id": "main",
             "indicatorId": "price",
             "heightFraction": (1.0 - indicator_total).max(0.38),
         })];
-        panes.extend(self.indicator_panes.iter().map(|pane| {
-            serde_json::json!({
-                "id": pane.pane_id,
-                "indicatorId": pane.indicator_id,
-                "heightFraction": pane.height_fraction,
-            })
-        }));
+        panes.extend(
+            self.indicator_panes
+                .iter()
+                .filter(|pane| pane.has_own_pane())
+                .map(|pane| {
+                    serde_json::json!({
+                        "id": pane.pane_id,
+                        "indicatorId": pane.indicator_id,
+                        "heightFraction": pane.height_fraction,
+                    })
+                }),
+        );
         panes
     }
 

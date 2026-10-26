@@ -62,7 +62,7 @@ impl ChartTool for FibonacciRetracement {
         let price_low = p1.price.min(p2.price);
         let price_range = price_high - price_low;
 
-        let chart_width = viewport.dimensions.width as f64;
+        let chart_width = viewport.plot_width();
         let label_x = chart_width - 4.0;
 
         for (ratio, label) in FIB_LEVELS {
@@ -109,7 +109,7 @@ impl ChartTool for FibonacciRetracement {
         let price_high = p1.price.max(p2.price);
         let price_low = p1.price.min(p2.price);
         let price_range = price_high - price_low;
-        let chart_width = viewport.dimensions.width as f64;
+        let chart_width = viewport.plot_width();
 
         if x < 0.0 || x > chart_width {
             return false;

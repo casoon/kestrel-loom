@@ -7,6 +7,7 @@ use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement};
 use kestrel_loom::canvas::{BitmapSpace, CssPixels, DevicePixels, MediaSpace, PixelRatio};
 use kestrel_loom::primitives::Color;
 use kestrel_loom::rendering::{RenderCommand, Renderer, TextAlign, TextBaseline};
+use kestrel_loom::utils::pixel;
 
 pub struct Canvas2DRenderer {
     pub ctx: CanvasRenderingContext2d,
@@ -16,7 +17,20 @@ pub struct Canvas2DRenderer {
     pixel_ratio: f64,
     bitmap_space: BitmapSpace,
     media_space: MediaSpace,
+    /// Hintergrund des letzten `clear` — hohle Kerzen füllen ihren Körper damit.
+    background: Color,
+    /// Zuletzt gesetzte Schrift; `set_font` je Textaufruf wäre je Frame ein
+    /// Dutzend unnötiger Übergänge.
+    last_font: String,
+    /// Zuletzt gesetzte Füll- und Strichfarbe. Jeder Wechsel kostet einen Farbtext
+    /// und einen Übergang nach JavaScript; gleiche Farben hintereinander (alle Kerzen
+    /// einer Richtung, Gitterlinien) sparen beides.
+    last_fill: Option<Color>,
+    last_stroke: Option<Color>,
 }
+
+/// Schrift für alle Beschriftungen. Inter, wo vorhanden; sonst die Systemschrift.
+const FONT_FAMILY: &str = "Inter, ui-sans-serif, system-ui, -apple-system, sans-serif";
 
 impl Canvas2DRenderer {
     pub fn pixel_ratio(&self) -> f64 {
@@ -48,6 +62,10 @@ impl Canvas2DRenderer {
             pixel_ratio,
             bitmap_space,
             media_space,
+            background: Color::rgba(0, 0, 0, 1.0),
+            last_font: String::new(),
+            last_fill: None,
+            last_stroke: None,
         })
     }
 
@@ -56,6 +74,11 @@ impl Canvas2DRenderer {
         let max_canvas_size = 16384;
         let max_pixels = 268435456; // 256MB limit
 
+        // Das Verhältnis bei jedem Größenwechsel neu lesen: zieht man das Fenster auf
+        // einen anderen Bildschirm, ändert es sich, und der Chart wäre sonst unscharf.
+        if let Some(window) = web_sys::window() {
+            self.pixel_ratio = window.device_pixel_ratio();
+        }
         let mut pr = self.pixel_ratio;
         let mut physical_width = (width as f64 * pr) as u32;
         let mut physical_height = (height as f64 * pr) as u32;
@@ -79,6 +102,9 @@ impl Canvas2DRenderer {
 
         // DON'T set CSS style here - that triggers ResizeObserver loop!
         // The CSS size is already set by the container element
+
+        // Das Setzen der Canvas-Größe setzt den ganzen Zeichenzustand zurück.
+        self.forget_style();
 
         // Reset transform and scale context for pixel ratio
         self.ctx.reset_transform()?;
@@ -224,17 +250,41 @@ impl Canvas2DRenderer {
         }
     }
 
-    fn set_fill_color(&self, color: Color) {
+    fn set_fill_color(&mut self, color: Color) {
+        if self.last_fill == Some(color) {
+            return;
+        }
         let color_str = format!("rgba({}, {}, {}, {})", color.r, color.g, color.b, color.a);
         self.ctx.set_fill_style_str(&color_str);
+        self.last_fill = Some(color);
     }
 
-    fn set_stroke_color(&self, color: Color) {
+    /// Vergisst, was zuletzt am Kontext gesetzt wurde — nach `restore` und nach einer
+    /// Größenänderung stimmt der Zwischenspeicher sonst nicht mehr mit dem Kontext überein.
+    fn forget_style(&mut self) {
+        self.last_fill = None;
+        self.last_stroke = None;
+        self.last_font.clear();
+    }
+
+    fn apply_font(&mut self, size: f32) {
+        let font = format!("{}px {}", size, FONT_FAMILY);
+        if font != self.last_font {
+            self.ctx.set_font(&font);
+            self.last_font = font;
+        }
+    }
+
+    fn set_stroke_color(&mut self, color: Color) {
+        if self.last_stroke == Some(color) {
+            return;
+        }
         let color_str = format!("rgba({}, {}, {}, {})", color.r, color.g, color.b, color.a);
         self.ctx.set_stroke_style_str(&color_str);
+        self.last_stroke = Some(color);
     }
 
-    /// Draw a horizontal line with pixel-perfect alignment (TradingView technique)
+    /// Eine waagrechte Linie, deren Kanten auf Gerätepixeln liegen.
     pub fn draw_horizontal_line(
         &mut self,
         y: f64,
@@ -243,18 +293,15 @@ impl Canvas2DRenderer {
         color: &Color,
         width: f64,
     ) {
-        let line_width = (width * self.pixel_ratio).floor().max(1.0);
-        let correction = if (line_width as i32) % 2 == 1 {
-            0.5
-        } else {
-            0.0
-        };
+        let pr = self.pixel_ratio;
+        let device_width = pixel::device_line_width(width, pr);
+        let y = pixel::line_center(y, pr, device_width);
 
         self.set_stroke_color(*color);
-        self.ctx.set_line_width(line_width);
+        self.ctx.set_line_width(device_width / pr);
         self.ctx.begin_path();
-        self.ctx.move_to(left, y + correction);
-        self.ctx.line_to(right, y + correction);
+        self.ctx.move_to(left, y);
+        self.ctx.line_to(right, y);
         self.ctx.stroke();
     }
 
@@ -302,21 +349,104 @@ impl Canvas2DRenderer {
         self.draw_polyline(points, stroke, width);
     }
 
-    /// Draw a vertical line with pixel-perfect alignment (TradingView technique)
+    /// Eine senkrechte Linie, deren Kanten auf Gerätepixeln liegen.
     pub fn draw_vertical_line(&mut self, x: f64, top: f64, bottom: f64, color: &Color, width: f64) {
-        let line_width = (width * self.pixel_ratio).floor().max(1.0);
-        let correction = if (line_width as i32) % 2 == 1 {
-            0.5
-        } else {
-            0.0
-        };
+        let pr = self.pixel_ratio;
+        let device_width = pixel::device_line_width(width, pr);
+        let x = pixel::line_center(x, pr, device_width);
 
         self.set_stroke_color(*color);
-        self.ctx.set_line_width(line_width);
+        self.ctx.set_line_width(device_width / pr);
         self.ctx.begin_path();
-        self.ctx.move_to(x + correction, top);
-        self.ctx.line_to(x + correction, bottom);
+        self.ctx.move_to(x, top);
+        self.ctx.line_to(x, bottom);
         self.ctx.stroke();
+    }
+
+    /// Füllt ein Rechteck, das in Gerätepixeln angegeben ist.
+    fn fill_device_rect(&mut self, left: f64, top: f64, width: f64, height: f64, color: Color) {
+        let pr = self.pixel_ratio;
+        self.set_fill_color(color);
+        self.ctx
+            .fill_rect(left / pr, top / pr, width / pr, height / pr);
+    }
+
+    /// Eine Kerze auf ganzen Gerätepixeln.
+    ///
+    /// Steigend und hohl: Körper in Hintergrundfarbe mit Rand. Sonst gefüllt.
+    /// Docht und Körper teilen eine Mitte, Kanten liegen auf Pixelgrenzen.
+    #[allow(clippy::too_many_arguments)]
+    fn paint_candle(
+        &mut self,
+        x: f64,
+        open_y: f64,
+        high_y: f64,
+        low_y: f64,
+        close_y: f64,
+        width: f64,
+        bullish_color: Color,
+        bearish_color: Color,
+        unchanged_color: Color,
+        hollow: bool,
+    ) {
+        let pr = self.pixel_ratio;
+        let doji = (close_y - open_y).abs() < 0.001;
+        let rising = close_y < open_y; // kleineres y = höherer Preis
+        let color = if doji {
+            unchanged_color
+        } else if rising {
+            bullish_color
+        } else {
+            bearish_color
+        };
+
+        let wick_css = if width >= 5.0 { 1.5 } else { 1.0 };
+        let cols = pixel::candle_columns(x, width, wick_css, pr);
+
+        let wick_top = (high_y * pr).round();
+        let wick_bottom = (low_y * pr).round().max(wick_top + 1.0);
+        self.fill_device_rect(
+            cols.wick_left,
+            wick_top,
+            cols.wick_width,
+            wick_bottom - wick_top,
+            color,
+        );
+
+        // Zu schmal für einen Körper: nur der Docht.
+        if width < 1.5 {
+            return;
+        }
+
+        let outline = cols.wick_width;
+        let body_top = (open_y.min(close_y) * pr).round();
+        let body_bottom = (open_y.max(close_y) * pr).round();
+        if doji || body_bottom - body_top < 1.0 {
+            self.fill_device_rect(
+                cols.body_left,
+                body_top - (outline / 2.0).floor(),
+                cols.body_width,
+                outline,
+                color,
+            );
+            return;
+        }
+
+        let height = body_bottom - body_top;
+        self.fill_device_rect(cols.body_left, body_top, cols.body_width, height, color);
+        if hollow && rising {
+            let inner_w = cols.body_width - 2.0 * outline;
+            let inner_h = height - 2.0 * outline;
+            if inner_w > 0.0 && inner_h > 0.0 {
+                self.fill_device_rect(
+                    cols.body_left + outline,
+                    body_top + outline,
+                    inner_w,
+                    inner_h,
+                    self.background,
+                );
+            }
+        }
     }
 }
 
@@ -419,14 +549,35 @@ impl Renderer for Canvas2DRenderer {
     }
 
     fn clear(&mut self, color: Color) {
+        self.background = color;
         self.set_fill_color(color);
         self.ctx
             .fill_rect(0.0, 0.0, self.width as f64, self.height as f64);
     }
 
     fn draw_line(&mut self, x1: f64, y1: f64, x2: f64, y2: f64, color: Color, width: f32) {
+        let pr = self.pixel_ratio;
+        let (mut x1, mut y1, mut x2, mut y2) = (x1, y1, x2, y2);
+        let mut line_width = width as f64;
+        // Achsenparallele Linien (Gitter, Achsen, Trennlinien) auf Gerätepixel legen;
+        // schräge bleiben, wie sie sind.
+        if y1 == y2 {
+            let device_width = pixel::device_line_width(line_width, pr);
+            y1 = pixel::line_center(y1, pr, device_width);
+            y2 = y1;
+            x1 = pixel::snap(x1, pr);
+            x2 = pixel::snap(x2, pr);
+            line_width = device_width / pr;
+        } else if x1 == x2 {
+            let device_width = pixel::device_line_width(line_width, pr);
+            x1 = pixel::line_center(x1, pr, device_width);
+            x2 = x1;
+            y1 = pixel::snap(y1, pr);
+            y2 = pixel::snap(y2, pr);
+            line_width = device_width / pr;
+        }
         self.set_stroke_color(color);
-        self.ctx.set_line_width(width as f64);
+        self.ctx.set_line_width(line_width);
         self.ctx.begin_path();
         self.ctx.move_to(x1, y1);
         self.ctx.line_to(x2, y2);
@@ -434,8 +585,23 @@ impl Renderer for Canvas2DRenderer {
     }
 
     fn fill_rect(&mut self, x: f64, y: f64, width: f64, height: f64, color: Color) {
+        // Kanten auf Gerätepixel: ein Rechteck mit Bruchteil-Kanten hätte weiche Ränder.
+        let pr = self.pixel_ratio;
+        let (left, top) = (pixel::snap(x, pr), pixel::snap(y, pr));
+        let (right, bottom) = (pixel::snap(x + width, pr), pixel::snap(y + height, pr));
+        let one = 1.0 / pr;
+        let w = if width > 0.0 {
+            (right - left).max(one)
+        } else {
+            0.0
+        };
+        let h = if height > 0.0 {
+            (bottom - top).max(one)
+        } else {
+            0.0
+        };
         self.set_fill_color(color);
-        self.ctx.fill_rect(x, y, width, height);
+        self.ctx.fill_rect(left, top, w, h);
     }
 
     fn stroke_rect(
@@ -463,7 +629,7 @@ impl Renderer for Canvas2DRenderer {
         baseline: TextBaseline,
     ) {
         self.set_fill_color(color);
-        self.ctx.set_font(&format!("{}px monospace", size));
+        self.apply_font(size);
 
         let align_str = match align {
             TextAlign::Left => "left",
@@ -482,6 +648,37 @@ impl Renderer for Canvas2DRenderer {
         let _ = self.ctx.fill_text(text, x, y);
     }
 
+    fn draw_text_halo(
+        &mut self,
+        text: &str,
+        x: f64,
+        y: f64,
+        color: Color,
+        halo: Color,
+        size: f32,
+        align: TextAlign,
+        baseline: TextBaseline,
+    ) {
+        self.apply_font(size);
+        self.ctx.set_text_align(match align {
+            TextAlign::Left => "left",
+            TextAlign::Center => "center",
+            TextAlign::Right => "right",
+        });
+        self.ctx.set_text_baseline(match baseline {
+            TextBaseline::Top => "top",
+            TextBaseline::Middle => "middle",
+            TextBaseline::Bottom => "bottom",
+        });
+        // Erst der Saum, dann der Text darüber.
+        self.set_stroke_color(halo);
+        self.ctx.set_line_width(3.0);
+        self.ctx.set_line_join("round");
+        let _ = self.ctx.stroke_text(text, x, y);
+        self.set_fill_color(color);
+        let _ = self.ctx.fill_text(text, x, y);
+    }
+
     fn draw_candle(
         &mut self,
         x: f64,
@@ -494,29 +691,18 @@ impl Renderer for Canvas2DRenderer {
         bearish_color: Color,
         unchanged_color: Color,
     ) {
-        // 3-color system: up, down, unchanged
-        let color = if (close_y - open_y).abs() < 0.001 {
-            unchanged_color // Doji: open === close
-        } else if close_y < open_y {
-            bullish_color // Bullish: close > open (lower Y = higher price)
-        } else {
-            bearish_color // Bearish: close < open
-        };
-
-        // Draw wick (high to low)
-        self.draw_line(x, high_y, x, low_y, color, 1.0);
-
-        // Draw body (open to close)
-        let body_top = open_y.min(close_y);
-        let body_height = (open_y - close_y).abs();
-        let body_x = x - width / 2.0;
-
-        if body_height < 1.0 {
-            // Doji - draw horizontal line
-            self.draw_line(body_x, open_y, body_x + width, open_y, color, 1.0);
-        } else {
-            self.fill_rect(body_x, body_top, width, body_height, color);
-        }
+        self.paint_candle(
+            x,
+            open_y,
+            high_y,
+            low_y,
+            close_y,
+            width,
+            bullish_color,
+            bearish_color,
+            unchanged_color,
+            false,
+        );
     }
 
     fn draw_indicator_line(
@@ -567,7 +753,9 @@ impl Renderer for Canvas2DRenderer {
     }
 
     fn clear_clip(&mut self) {
+        // `restore` setzt Farben und Schrift auf den Stand vor `save` zurück.
         self.ctx.restore();
+        self.forget_style();
     }
 
     fn dimensions(&self) -> (u32, u32) {
@@ -614,7 +802,7 @@ impl Canvas2DRenderer {
         self.draw_line(x, close_y, x + arm_length, close_y, color, 2.0);
     }
 
-    /// Draw hollow candlestick (outline only)
+    /// Hohle Kerze: steigend nur umrandet, fallend gefüllt.
     #[allow(clippy::too_many_arguments)] // Zeichenparameter, kein Sammeltyp nötig
     pub fn draw_hollow_candle(
         &mut self,
@@ -628,29 +816,18 @@ impl Canvas2DRenderer {
         bearish_color: Color,
         unchanged_color: Color,
     ) {
-        // 3-color system: up, down, unchanged
-        let color = if (close_y - open_y).abs() < 0.001 {
-            unchanged_color // Doji: open === close
-        } else if close_y < open_y {
-            bullish_color // Bullish: close > open (lower Y = higher price)
-        } else {
-            bearish_color // Bearish: close < open
-        };
-
-        // Draw wick (high to low)
-        self.draw_line(x, high_y, x, low_y, color, 1.0);
-
-        // Draw body outline (open to close)
-        let body_top = open_y.min(close_y);
-        let body_height = (open_y - close_y).abs();
-        let body_x = x - width / 2.0;
-
-        if body_height < 1.0 {
-            // Doji - draw horizontal line
-            self.draw_line(body_x, open_y, body_x + width, open_y, color, 1.0);
-        } else {
-            self.stroke_rect(body_x, body_top, width, body_height, color, 1.0);
-        }
+        self.paint_candle(
+            x,
+            open_y,
+            high_y,
+            low_y,
+            close_y,
+            width,
+            bullish_color,
+            bearish_color,
+            unchanged_color,
+            true,
+        );
     }
 
     /// Draw a circle

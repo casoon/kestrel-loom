@@ -101,6 +101,15 @@ pub struct Viewport {
     pub scale_mode: ViewportScaleMode,
     /// Base price for percent/indexed modes (first visible candle close)
     pub scale_base_price: f64,
+    /// Breite der Preisachse rechts, die der Datenbereich nicht überdeckt. Auf 0
+    /// bleibt der Datenbereich so breit wie die Zeichenfläche (Standard, solange
+    /// der Aufrufer keine Achse zeichnet).
+    pub axis_inset: f64,
+    /// Höhe, die Indikator-Panes unten beanspruchen. Die Preisskala gilt nur für
+    /// den Rest ([`Viewport::price_height`]); `render_chart` setzt den Wert je Frame.
+    /// Ohne ihn rechneten Fadenkreuz und Zeichenwerkzeuge mit der vollen Höhe und
+    /// läsen bei jedem Pane einen anderen Preis ab, als die Kerzen zeigen.
+    pub pane_inset: f64,
 }
 
 impl Viewport {
@@ -130,7 +139,19 @@ impl Viewport {
             timezone_offset_minutes: 0,
             scale_mode: ViewportScaleMode::Price,
             scale_base_price: 0.0,
+            axis_inset: 0.0,
+            pane_inset: 0.0,
         }
+    }
+
+    /// Höhe des Preisbereichs: die Zeichenhöhe ohne Indikator-Panes.
+    pub fn price_height(&self) -> f64 {
+        (self.dimensions.height as f64 - self.pane_inset).max(1.0)
+    }
+
+    /// Breite des Datenbereichs: die Zeichenfläche ohne Preisachse.
+    pub fn plot_width(&self) -> f64 {
+        (self.dimensions.width as f64 - self.axis_inset).max(1.0)
     }
 
     /// Set dimensions
@@ -258,7 +279,7 @@ impl Viewport {
     /// taten schlicht nichts.
     pub fn pan(&mut self, delta_x: i32, delta_y: i32) {
         if delta_x != 0 {
-            let bars_per_pixel = self.bars.span() / self.dimensions.width.max(1) as f64;
+            let bars_per_pixel = self.bars.span() / self.plot_width();
             let shift = -delta_x as f64 * bars_per_pixel;
             self.bars.first += shift;
             self.bars.last += shift;
@@ -275,7 +296,7 @@ impl Viewport {
     /// Im Log-Modus wird im Logarithmus verschoben, sonst würde derselbe
     /// Pixelweg unten anders wirken als oben.
     pub fn pan_price(&mut self, delta_y: f64) {
-        let h = self.dimensions.height as f64;
+        let h = self.price_height();
         if h <= 0.0 {
             return;
         }
@@ -303,7 +324,7 @@ impl Viewport {
     pub fn zoom(&mut self, factor: f64, center_x: Option<u32>) {
         let cx = center_x
             .map(|c| c as f64)
-            .unwrap_or(self.dimensions.width as f64 / 2.0);
+            .unwrap_or(self.plot_width() / 2.0);
         let center_bar = self.x_to_bar(cx);
 
         let new_span = self.bars.span() * factor;
@@ -325,13 +346,12 @@ impl Viewport {
         if span <= 0.0 {
             return 0.0;
         }
-        (bar - self.bars.first) / span * self.dimensions.width as f64
+        (bar - self.bars.first) / span * self.plot_width()
     }
 
     /// Fraktionaler Bar-Index an einer Bildschirmposition.
     pub fn x_to_bar(&self, x: f64) -> f64 {
-        let width = self.dimensions.width.max(1) as f64;
-        self.bars.first + (x / width) * self.bars.span()
+        self.bars.first + (x / self.plot_width()) * self.bars.span()
     }
 
     /// Convert time to x pixel coordinate
@@ -346,7 +366,7 @@ impl Viewport {
 
     /// Convert price to y pixel coordinate
     pub fn price_to_y(&self, price: f64) -> f64 {
-        let h = self.dimensions.height as f64;
+        let h = self.price_height();
         if self.log_scale {
             let log_min = self.price.min.max(1e-10).ln();
             let log_max = self.price.max.max(1e-10).ln();
@@ -360,7 +380,7 @@ impl Viewport {
 
     /// Convert y pixel to price
     pub fn y_to_price(&self, y: f64) -> f64 {
-        let h = self.dimensions.height as f64;
+        let h = self.price_height();
         if self.log_scale {
             let log_min = self.price.min.max(1e-10).ln();
             let log_max = self.price.max.max(1e-10).ln();
@@ -387,7 +407,7 @@ impl Viewport {
         if span <= 0.0 {
             return 1.0;
         }
-        let base = self.dimensions.width as f64 / span;
+        let base = self.plot_width() / span;
         (base + self.bar_spacing_extra).clamp(1.0, 200.0)
     }
 
@@ -434,7 +454,7 @@ impl Viewport {
     /// Returns the inverted Y coordinate for tracking
     pub fn start_price_scale(&self, y: f64) -> f64 {
         // Invert Y (0 is top, height is bottom)
-        self.dimensions.height as f64 - y
+        self.price_height() - y
     }
 
     /// Apply price scaling based on Y movement
@@ -448,13 +468,13 @@ impl Viewport {
         initial_price_range: &PriceRange,
     ) {
         // Invert current Y
-        let y = self.dimensions.height as f64 - current_y;
+        let y = self.price_height() - current_y;
 
         // Clamp to valid range
         let y = y.max(0.0);
 
         // Calculate scale coefficient with 20% padding (like lightweight-charts)
-        let height = self.dimensions.height as f64;
+        let height = self.price_height();
         let padding_factor = 0.2;
 
         let scale_coeff =
@@ -488,7 +508,7 @@ impl Viewport {
         let start_x = start_x.max(0.0);
 
         // Calculate scale coefficient with 20% padding
-        let width = self.dimensions.width as f64;
+        let width = self.plot_width();
         let padding_factor = 0.2;
 
         let scale_coeff = (start_x + (width - 1.0) * padding_factor)
@@ -810,5 +830,22 @@ mod unit_consistency_tests {
             after < before,
             "zoom(0.5) muss den Ausschnitt verkleinern (vorher {before}, nachher {after})"
         );
+    }
+
+    #[test]
+    fn the_plot_width_leaves_room_for_the_price_axis() {
+        let mut vp = Viewport::new(800, 400);
+        assert_eq!(
+            vp.plot_width(),
+            800.0,
+            "ohne Achse bleibt es bei der vollen Breite"
+        );
+
+        vp.axis_inset = 64.0;
+        assert_eq!(vp.plot_width(), 736.0);
+        vp.set_bars(0.0, 100.0);
+        assert!((vp.bar_to_x(100.0) - 736.0).abs() < 1e-9);
+        assert!((vp.x_to_bar(736.0) - 100.0).abs() < 1e-9);
+        assert!((vp.bar_width() - 7.36).abs() < 1e-9);
     }
 }

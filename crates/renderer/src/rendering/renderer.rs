@@ -191,6 +191,22 @@ pub trait Renderer {
         baseline: TextBaseline,
     );
 
+    /// Text mit Saum in Hintergrundfarbe: bleibt auch über Linien und Kerzen lesbar,
+    /// ohne einen Kasten dahinter. Backends ohne Saum zeichnen schlichten Text.
+    fn draw_text_halo(
+        &mut self,
+        text: &str,
+        x: f64,
+        y: f64,
+        color: Color,
+        _halo: Color,
+        size: f32,
+        align: TextAlign,
+        baseline: TextBaseline,
+    ) {
+        self.draw_text(text, x, y, color, size, align, baseline);
+    }
+
     /// Draw a candle (optimized batch operation)
     fn draw_candle(
         &mut self,

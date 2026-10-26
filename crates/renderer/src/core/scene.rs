@@ -56,12 +56,39 @@ fn with_opacity(color: Color, opacity: f64) -> Color {
 /// Deckkraft der Objektfarbe. Panes der Szene werden **nicht** eigenständig
 /// aufgeteilt — alle Objekte landen im Preisbereich (siehe Modul-Doku).
 pub fn render_scene(scene: &Scene, state: &ChartState, renderer: &mut dyn Renderer) {
+    render_scene_layer(scene, state, renderer, SceneLayer::All);
+}
+
+/// Welche Objekte einer Szene ein Durchgang zeichnet.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SceneLayer {
+    /// Alles, in `z_order`-Reihenfolge.
+    All,
+    /// Objekte mit `z_order` ≤ 0 — Flächen wie Zonen, die hinter den Kerzen liegen.
+    Behind,
+    /// Objekte mit `z_order` > 0 — Linien, Marker, Beschriftungen vor den Kerzen.
+    Front,
+}
+
+/// Zeichnet nur einen Teil der Szene (siehe [`SceneLayer`]).
+pub fn render_scene_layer(
+    scene: &Scene,
+    state: &ChartState,
+    renderer: &mut dyn Renderer,
+    layer: SceneLayer,
+) {
     let vp = &state.viewport;
     let x = |time: f64| vp.time_to_x(Seconds::new(time as i64));
     let y = |price: f64| vp.price_to_y(price);
 
     for pane in scene.panes() {
         for object in pane.objects_z_ordered() {
+            match layer {
+                SceneLayer::All => {}
+                SceneLayer::Behind if object.z_order > 0 => continue,
+                SceneLayer::Front if object.z_order <= 0 => continue,
+                _ => {}
+            }
             let alpha = object.opacity;
             match &object.kind {
                 SceneObjectKind::Polyline {
@@ -147,11 +174,14 @@ pub fn render_scene(scene: &Scene, state: &ChartState, renderer: &mut dyn Render
                     content,
                     color,
                 } => {
-                    renderer.draw_text(
+                    // Beschriftungen mit Saum in Hintergrundfarbe: lesbar über Kerzen und
+                    // Linien, ohne Kasten.
+                    renderer.draw_text_halo(
                         content,
                         x(*tx),
                         y(*ty),
                         with_opacity(parse_color(color), alpha),
+                        state.options.background_color,
                         11.0,
                         crate::rendering::TextAlign::Left,
                         crate::rendering::TextBaseline::Middle,

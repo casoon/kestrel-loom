@@ -63,13 +63,13 @@ impl ChartTool for VerticalLine {
     fn render(&self, renderer: &mut dyn Renderer, viewport: &Viewport) {
         if let Some(time) = self.time() {
             let x = viewport.time_to_x(time);
-            let height = viewport.dimensions.height as f64;
+            let height = viewport.price_height();
 
             // Draw vertical line from top to bottom
             renderer.draw_vertical_line(x, 0.0, height, &self.color, self.width);
 
             // Draw time label at bottom
-            let label_y = viewport.dimensions.height as f64 - 25.0;
+            let label_y = viewport.price_height() - 25.0;
             let date = chrono::DateTime::from_timestamp(time.get(), 0)
                 .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
                 .unwrap_or_else(|| time.to_string());

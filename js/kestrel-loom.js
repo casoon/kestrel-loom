@@ -60,16 +60,23 @@ export async function createChart(canvas, options = {}) {
   const applySize = () => {
     const r = canvas.getBoundingClientRect();
     if (r.width < 1 || r.height < 1) return;
-    const dpr = window.devicePixelRatio || 1;
-    canvas.width = Math.round(r.width * dpr);
-    canvas.height = Math.round(r.height * dpr);
-    // resize() markiert den Zustand als verändert — der Browser hat den Canvas
-    // beim Setzen von width/height geleert.
+    // Vor dem Anhängen des Canvas legt nur der Zustand die Maße fest; danach setzt
+    // der Renderer die Pixelgröße selbst, mit dem aktuellen Pixelverhältnis.
+    // Beides hier zu tun, leerte den Canvas zweimal je Größenwechsel.
+    // resize() markiert den Zustand als verändert.
+    if (!attached) {
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = Math.round(r.width * dpr);
+      canvas.height = Math.round(r.height * dpr);
+    }
     chart.resize(r.width, r.height);
   };
 
+  let attached = false;
+
   applySize();
   chart.attachCanvas(canvas);
+  attached = true;
   chart.setTheme(dark);
 
   const teardown = [];
@@ -98,18 +105,30 @@ export async function createChart(canvas, options = {}) {
     on(window, 'mouseup', (e) => chart.onMouseUp(...local(e), e.button));
     on(canvas, 'mouseleave', () => chart.onMouseLeave());
     on(canvas, 'dblclick', (e) => chart.onDoubleClick(...local(e)));
+    // Das Rad gehört dem Chart nur, wenn es etwas Eindeutiges meint: Zoom
+    // (⌘/Strg oder Pinch — macOS meldet Pinch als Strg + Rad) oder waagrechtes
+    // Wischen. Alles andere ist Seitenscrollen und bleibt es. Eine begonnene Geste
+    // behält ihre Deutung, damit ein leicht schräger Wisch nicht mittendrin an
+    // die Seite fällt.
+    let wheelGestureUntil = 0;
     on(
       canvas,
       'wheel',
       (e) => {
+        const zoom = e.ctrlKey || e.metaKey;
+        const horizontal = Math.abs(e.deltaX) > Math.abs(e.deltaY) * 2;
+        const inGesture = e.timeStamp < wheelGestureUntil;
+        if (!zoom && !horizontal && !inGesture) return;
         e.preventDefault();
+        wheelGestureUntil = e.timeStamp + 200;
         // Vollständig durchreichen: erst aus deltaX, ctrlKey, deltaMode und
         // Zeitstempel zusammen lässt sich Trackpad von Mausrad unterscheiden.
+        // ⌘ zählt für den Kern wie Strg: Zoom.
         chart.onWheel(
           ...local(e),
           e.deltaX,
           e.deltaY,
-          e.ctrlKey,
+          zoom,
           e.deltaMode,
           e.timeStamp,
         );
@@ -151,7 +170,18 @@ export async function createChart(canvas, options = {}) {
       const touch = e.changedTouches[0];
       if (touch) chart.onTouchEnd(...local(touch), e.timeStamp);
     });
-    on(window, 'keydown', (e) => chart.onKeyDown(e.key));
+    // Tasten gelten nur, solange der Chart den Fokus hat. Am Fenster hängend
+    // verschoben die Pfeiltasten den Chart auch beim Tippen in einem Eingabefeld.
+    if (!canvas.hasAttribute('tabindex')) canvas.tabIndex = 0;
+    canvas.style.outline = 'none';
+    const chartKeys = new Set([
+      'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', '+', '=', '-', '_', 'Home', 'h',
+    ]);
+    on(canvas, 'keydown', (e) => {
+      if (e.metaKey || e.ctrlKey || e.altKey || !chartKeys.has(e.key)) return;
+      e.preventDefault();
+      chart.onKeyDown(e.key);
+    });
   }
 
   let observer = null;
@@ -159,6 +189,23 @@ export async function createChart(canvas, options = {}) {
     observer = new ResizeObserver(applySize);
     observer.observe(canvas);
     teardown.push(() => observer.disconnect());
+  }
+
+  // Das Pixelverhältnis ändert sich, wenn das Fenster auf einen anderen Bildschirm
+  // wechselt oder der Nutzer zoomt — die Größe in CSS-Pixeln bleibt dabei gleich,
+  // der ResizeObserver meldet also nichts, und der Chart wäre unscharf.
+  if (autoResize && typeof matchMedia === 'function') {
+    let query = null;
+    const onRatioChange = () => {
+      applySize();
+      watchRatio();
+    };
+    const watchRatio = () => {
+      query = matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`);
+      query.addEventListener('change', onRatioChange, { once: true });
+    };
+    watchRatio();
+    teardown.push(() => query.removeEventListener('change', onRatioChange));
   }
 
   let frame = null;
@@ -224,6 +271,11 @@ export async function createChart(canvas, options = {}) {
        */
       scrollbar: (on) =>
         on === undefined ? chart.getShowScrollbar() : chart.setShowScrollbar(on),
+      /**
+       * Volumen unten in der Preis-Pane. Standard: aus. Der Chart weiß nicht, ob die
+       * Quelle echtes Börsenvolumen liefert — das entscheidet der Aufrufer.
+       */
+      volume: (on) => (on === undefined ? chart.getShowVolume() : chart.setShowVolume(on)),
       /** Bildschirm-x eines Zeitstempels — für eigene Marker über dem Chart. */
       timeToX: (time) => chart.timeToX(t(time)),
       /** Zeitstempel an einer Bildschirmposition. */
@@ -238,6 +290,9 @@ export async function createChart(canvas, options = {}) {
     indicators: {
       /** Namen aller Indikatoren aus `kestrel-chartkit`. */
       available: () => parse(WasmChart.availableIndicators(), []),
+      /** Eigenes Pane (`true`) oder Overlay auf dem Preis (`false`)? */
+      hasOwnPane: (name) => WasmChart.indicatorHasOwnPane(name),
+      /** Gibt die Pane-ID zurück; ein Overlay auf dem Preis liefert `''`. */
       add: (name, params = {}) => chart.addIndicatorPane(name, JSON.stringify(params)),
       remove: (paneId) => chart.removePane(paneId),
       height: (paneId, fraction) => chart.setPaneHeightFraction(paneId, fraction),

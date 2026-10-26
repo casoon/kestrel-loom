@@ -217,6 +217,35 @@ fn an_unknown_indicator_is_refused_instead_of_ignored() {
 }
 
 #[wasm_bindgen_test]
+fn an_overlay_has_no_pane_and_costs_no_height() {
+    let mut chart = chart_with_data(60);
+    assert!(WasmChart::indicator_has_own_pane("rsi"));
+    assert!(!WasmChart::indicator_has_own_pane("ema"));
+    assert_eq!(chart.add_indicator_pane("ema", "{}").unwrap(), "");
+    assert_eq!(chart.add_indicator_pane("rsi", "{}").unwrap(), "pane-rsi");
+    let layout: serde_json::Value = serde_json::from_str(&chart.get_pane_layout()).unwrap();
+    let ids: Vec<_> = layout
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| p["id"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(
+        ids,
+        ["main", "pane-rsi"],
+        "Overlay taucht im Pane-Layout nicht auf"
+    );
+}
+
+#[wasm_bindgen_test]
+fn volume_is_off_until_the_caller_asks_for_it() {
+    let mut chart = chart_with_data(60);
+    assert!(!chart.get_show_volume());
+    chart.set_show_volume(true);
+    assert!(chart.get_show_volume());
+}
+
+#[wasm_bindgen_test]
 fn indicator_parameters_must_be_numbers() {
     let mut chart = chart_with_data(60);
     assert!(chart.add_indicator_pane("rsi", "{\"rsi_len\": 21}").is_ok());
@@ -278,20 +307,20 @@ fn two_finger_pinch_zooms_in() {
     );
 }
 
-/// Ein Trackpad-Wischer endet abrupt; `tick` holt den Nachlauf nach.
+/// Ein Finger auf dem Touchscreen hat keinen System-Nachlauf; `tick` liefert ihn.
 #[wasm_bindgen_test]
-fn a_released_swipe_glides_after_the_gesture() {
+fn a_released_touch_swipe_glides_after_the_gesture() {
     let mut chart = chart_with_data(200);
 
-    for step in 0..3 {
-        chart.on_wheel(400.0, 200.0, 8.0, 0.0, false, 0, step as f64 * 16.0);
+    chart.on_touch_start(400.0, 200.0, 0.0);
+    for step in 1..=3 {
+        chart.on_touch_move(400.0 - step as f64 * 20.0, 200.0, step as f64 * 16.0);
     }
+    chart.on_touch_end(340.0, 200.0, 48.0);
     let at_rest = chart.x_to_time(400.0);
 
-    // Geste setzt aus, der Nachlauf startet und schreitet fort.
-    let _ = chart.tick(300.0);
     assert!(
-        chart.tick(316.0),
+        chart.tick(64.0),
         "der Nachlauf muss den Ausschnitt weiterziehen"
     );
     assert_ne!(
@@ -299,6 +328,21 @@ fn a_released_swipe_glides_after_the_gesture() {
         at_rest,
         "der sichtbare Ausschnitt hat sich bewegt"
     );
+}
+
+/// macOS liefert das Ausrollen eines Trackpad-Wischers selbst als Rad-Ereignisse.
+#[wasm_bindgen_test]
+fn a_trackpad_swipe_has_no_glide_of_its_own() {
+    let mut chart = chart_with_data(200);
+
+    for step in 0..3 {
+        chart.on_wheel(400.0, 200.0, 8.0, 0.0, false, 0, step as f64 * 16.0);
+    }
+    let at_rest = chart.x_to_time(400.0);
+
+    let _ = chart.tick(300.0);
+    assert!(!chart.tick(316.0));
+    assert_eq!(chart.x_to_time(400.0), at_rest);
 }
 
 #[wasm_bindgen_test]
