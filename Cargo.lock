@@ -352,8 +352,8 @@ dependencies = [
 
 [[package]]
 name = "kestrel-chartkit"
-version = "0.34.0"
-source = "git+https://github.com/casoon/kestrel-chartkit.git?tag=v0.34.0#3a623a6fe8749494a48f8de65364dc99b3768996"
+version = "0.35.0"
+source = "git+https://github.com/casoon/kestrel-chartkit.git?tag=v0.35.0#1639d4b5cfd25988118af58201935fb5e99564f9"
 dependencies = [
  "serde",
 ]
