@@ -10,7 +10,7 @@
 use std::collections::HashMap;
 
 use kestrel_chartkit::artifact::Artifact;
-use kestrel_chartkit::indicator::registry::{build_checked, catalog};
+use kestrel_chartkit::indicator::registry::{build_checked, catalog_of, IndicatorInput};
 use kestrel_chartkit::{output_unit, Bar, Indicator, IndicatorUnit};
 
 use crate::core::types::Seconds;
@@ -127,7 +127,10 @@ impl IndicatorSeries {
 
     /// Namen aller verfügbaren Indikatoren.
     pub fn available() -> Vec<String> {
-        catalog().iter().map(|e| e.name.to_string()).collect()
+        catalog_of(IndicatorInput::Bars)
+            .iter()
+            .map(|e| e.name.to_string())
+            .collect()
     }
 
     pub fn name(&self) -> &str {
