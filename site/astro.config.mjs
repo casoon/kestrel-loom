@@ -21,8 +21,6 @@ export default defineConfig({
       demo: 'Demo',
       mdxComponents: './src/mdx-components.ts',
       showcase: false,
-      // No CHANGELOG.md and no release notes yet.
-      changelog: false,
       docsGroups: {
         'getting-started': 'Getting started',
         guides: 'Guides',
