@@ -551,7 +551,22 @@ impl WasmChart {
             opts.bearish_color = Color::rgba(208, 58, 15, 1.0);
             opts.unchanged_color = Color::rgba(102, 112, 133, 1.0);
         }
+        // Ein Themenwechsel verwirft die Linienfarbe einer früheren Palette.
+        opts.line_color = None;
         self.state.mark_dirty();
+    }
+
+    /// Eigene Farben setzen, ohne Neuaufbau. `json` ist ein Objekt mit beliebigen
+    /// der Felder `bg`, `grid`, `text`, `up`, `down`, `line`, `crosshair`,
+    /// `unchanged`; Werte sind Hex-Farben (`#rrggbb` oder `#rrggbbaa`). Nicht
+    /// genannte Felder bleiben, wie sie sind; `setTheme` stellt die Standardfarben
+    /// des Themes wieder her.
+    #[wasm_bindgen(js_name = setPalette)]
+    pub fn set_palette(&mut self, json: &str) -> Result<(), JsValue> {
+        let palette = parse_palette(json).map_err(|e| JsValue::from_str(&e))?;
+        self.state.options.apply_palette(&palette);
+        self.state.mark_dirty();
+        Ok(())
     }
 
     /// Volumen unten in der Preis-Pane ein- oder ausschalten. Aus ist der Standard:
@@ -1644,4 +1659,28 @@ fn parse_params(params_json: &str) -> Result<HashMap<String, f64>, JsValue> {
     }
     serde_json::from_str::<HashMap<String, f64>>(trimmed)
         .map_err(|e| JsValue::from_str(&format!("Ungültige Indikator-Parameter: {e}")))
+}
+
+/// Liest ein Palette-Objekt aus JSON; unbekannte Felder und ungültige Farben sind Fehler.
+pub fn parse_palette(json: &str) -> Result<kestrel_loom::core::Palette, String> {
+    use kestrel_loom::primitives::Color;
+    let map: HashMap<String, String> =
+        serde_json::from_str(json).map_err(|e| format!("Palette: {e}"))?;
+    let mut palette = kestrel_loom::core::Palette::default();
+    for (key, value) in map {
+        let color = Color::from_hex(&value).map_err(|e| format!("Palette {key}: {e}"))?;
+        let slot = match key.as_str() {
+            "bg" => &mut palette.bg,
+            "grid" => &mut palette.grid,
+            "text" => &mut palette.text,
+            "up" => &mut palette.up,
+            "down" => &mut palette.down,
+            "line" => &mut palette.line,
+            "crosshair" => &mut palette.crosshair,
+            "unchanged" => &mut palette.unchanged,
+            other => return Err(format!("Palette: unbekanntes Feld {other}")),
+        };
+        *slot = Some(color);
+    }
+    Ok(palette)
 }

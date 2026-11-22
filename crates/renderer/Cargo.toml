@@ -1,6 +1,6 @@
 [package]
 name = "kestrel-loom"
-version = "0.1.0"
+version = "0.2.0"
 description = "Interactive trading-chart renderer: chart state and drawing commands, free of browser APIs"
 edition.workspace = true
 rust-version.workspace = true

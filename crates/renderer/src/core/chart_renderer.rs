@@ -772,6 +772,15 @@ fn line_color(index: usize, dark: bool) -> Color {
     Color::rgba(r, g, b, if index == 0 { 0.95 } else { 0.85 })
 }
 
+/// Farbe der n-ten Indikatorlinie: die erste folgt einer gesetzten Palette, sonst
+/// gilt die Linienpalette des Themes.
+fn series_color(state: &ChartState, index: usize) -> Color {
+    match (index, state.options.line_color) {
+        (0, Some(color)) => color.with_alpha(0.95),
+        _ => line_color(index, is_dark(state)),
+    }
+}
+
 /// Ist der Hintergrund dunkel? Entscheidet über die Linienpalette.
 fn is_dark(state: &ChartState) -> bool {
     let bg = state.options.background_color;
@@ -798,7 +807,7 @@ fn render_overlay_indicators(
                 .map(|(time, value)| (vp.time_to_x(*time), vp.price_to_y(*value)))
                 .collect();
             if points.len() >= 2 {
-                renderer.draw_polyline(&points, line_color(index, is_dark(state)), 1.4);
+                renderer.draw_polyline(&points, series_color(state, index), 1.4);
             }
         }
     }
@@ -1023,7 +1032,7 @@ fn render_indicator_panes(
                 if points.len() >= 2 {
                     renderer.draw_polyline(
                         &points,
-                        line_color(index, is_dark(state)),
+                        series_color(state, index),
                         if index == 0 { 1.6 } else { 1.2 },
                     );
                 }

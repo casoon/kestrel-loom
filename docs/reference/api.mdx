@@ -42,13 +42,17 @@ all()  at(x, y)  ohlcText()`}
   kind="group"
   lang="js"
   name="view"
-  signature={`fit()  resize()  theme(isDark)  info()  crosshair()
+  signature={`fit()  resize()  theme(isDark)  palette(colors)  info()  crosshair()
 logScale(on?)  priceLocked(on?)  scaleMode(mode?)  barSpacing(px?)  barWidthRatio(r)
 timezone(minutes?)  sessions(list)  showSessions(on)  rightOffset(bars?)  scrollbar(on?)
 resetPriceScale()  resetTimeScale()  timeToX(time)  xToTime(x)`}
 >
   Getter when called without an argument, setter with one. `scaleMode` takes `price`, `log`,
-  `percent` or `indexed`.
+  `percent` or `indexed`. `palette(colors)` sets your own colors without rebuilding the chart:
+  an object with any of `bg`, `grid`, `text`, `up`, `down`, `line` (first indicator line),
+  `crosshair`, `unchanged`, as hex strings (`#rrggbb` or `#rrggbbaa`). Fields you leave out stay
+  as they are; `theme(isDark)` restores the built-in colors. The same object can be passed to
+  `createChart` as `palette`.
 </ApiEntry>
 
 <ApiEntry

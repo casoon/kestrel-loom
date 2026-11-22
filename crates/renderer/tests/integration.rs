@@ -312,3 +312,96 @@ fn test_scenario_recovery() {
     // May not fully recover, but should be higher than crash bottom
     assert!(end_price > crash_bottom, "Should recover from crash");
 }
+
+mod palette {
+    use kestrel_loom::core::{
+        render_chart, Candle, CandleGenerator, ChartState, GeneratorConfig, Palette, RenderExtras,
+        Timeframe,
+    };
+    use kestrel_loom::primitives::Color;
+    use kestrel_loom::{BatchRenderer, RenderCommand};
+
+    fn frame(state: &mut ChartState) -> Vec<RenderCommand> {
+        state.mark_dirty();
+        let mut rec = BatchRenderer::new(800, 400);
+        render_chart(state, &RenderExtras::default(), &mut rec);
+        rec.commands().to_vec()
+    }
+
+    fn state() -> ChartState {
+        let mut generator = CandleGenerator::new(
+            GeneratorConfig::crypto()
+                .with_seed(7)
+                .with_timeframe(Timeframe::M5),
+        );
+        let mut state = ChartState::new(800, 400, Timeframe::M5);
+        let candles: Vec<Candle> = generator.generate(80);
+        state.set_candles(candles);
+        state.fit_to_data();
+        state
+    }
+
+    fn clear_color(commands: &[RenderCommand]) -> Color {
+        commands
+            .iter()
+            .find_map(|c| match c {
+                RenderCommand::Clear { color } => Some(*color),
+                _ => None,
+            })
+            .expect("Frame beginnt mit Clear")
+    }
+
+    #[test]
+    fn without_a_palette_the_default_colors_stay() {
+        let mut a = state();
+        let mut b = state();
+        b.options.apply_palette(&Palette::default());
+        assert_eq!(
+            format!("{:?}", frame(&mut a)),
+            format!("{:?}", frame(&mut b))
+        );
+        assert_eq!(clear_color(&frame(&mut a)), Color::rgba(14, 19, 28, 1.0));
+    }
+
+    #[test]
+    fn a_custom_palette_changes_background_and_candles() {
+        let mut s = state();
+        let before = frame(&mut s);
+        let palette = Palette {
+            bg: Some(Color::from_hex("#202124").unwrap()),
+            up: Some(Color::from_hex("#2e7d32").unwrap()),
+            down: Some(Color::from_hex("#c62828").unwrap()),
+            ..Palette::default()
+        };
+        s.options.apply_palette(&palette);
+        let after = frame(&mut s);
+        assert_eq!(clear_color(&after), Color::rgba(32, 33, 36, 1.0));
+        assert_ne!(format!("{before:?}"), format!("{after:?}"));
+        let text = format!("{after:?}");
+        assert!(
+            text.contains("r: 46, g: 125, b: 50"),
+            "Kerze auf in Palettenfarbe"
+        );
+        assert!(
+            text.contains("r: 198, g: 40, b: 40"),
+            "Kerze ab in Palettenfarbe"
+        );
+    }
+
+    #[test]
+    fn the_palette_can_be_swapped_at_runtime() {
+        let mut s = state();
+        let first = Palette {
+            bg: Some(Color::from_hex("#ffffff").unwrap()),
+            ..Palette::default()
+        };
+        let second = Palette {
+            bg: Some(Color::from_hex("#202020").unwrap()),
+            ..Palette::default()
+        };
+        s.options.apply_palette(&first);
+        assert_eq!(clear_color(&frame(&mut s)), Color::rgba(255, 255, 255, 1.0));
+        s.options.apply_palette(&second);
+        assert_eq!(clear_color(&frame(&mut s)), Color::rgba(32, 32, 32, 1.0));
+    }
+}

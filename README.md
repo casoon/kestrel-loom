@@ -55,6 +55,7 @@ const chart = await createChart(canvas, { timeframe: '5m', dark: true });
 
 chart.data.set(candles);          // [{ time, o, h, l, c, v }], time in Unix seconds
 chart.view.fit();
+chart.view.palette({ bg: '#202124', up: '#2e7d32', down: '#c62828' }); // optional own colors
 chart.indicators.add('rsi');      // any name from chart.indicators.available()
 chart.tools.trendLine('t1', { time: 1600010000, price: 99 },
                             { time: 1600060000, price: 103 });

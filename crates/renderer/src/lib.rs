@@ -19,8 +19,8 @@ pub mod utils;
 pub use core::{
     Candle, CandleGenerator, Chart, ChartBuffer, ChartConfig, ChartOptions, ChartState,
     CrosshairState, Dimensions, EventHandler, GeneratorConfig, InteractionState, KeyboardEvent,
-    MarketType, MouseButton, MouseEvent, Point, PriceRange, TimeRange, Timeframe, TouchEvent,
-    Trend, Viewport, VolatilityRegime,
+    MarketType, MouseButton, MouseEvent, Palette, Point, PriceRange, TimeRange, Timeframe,
+    TouchEvent, Trend, Viewport, VolatilityRegime,
 };
 
 pub use panels::{

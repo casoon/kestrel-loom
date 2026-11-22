@@ -39,7 +39,9 @@ pub use chart_renderer::{
     pane_height_total, render_chart, scene_from_indicator_panes, update_indicator_panes,
     CompareSymbol, IndicatorPane, RenderExtras,
 };
-pub use chart_state::{ChartOptions, ChartState, CrosshairState, InteractionState, MagnetMode};
+pub use chart_state::{
+    ChartOptions, ChartState, CrosshairState, InteractionState, MagnetMode, Palette,
+};
 pub use config::ChartConfig;
 pub use events::{EventHandler, KeyboardEvent, MouseButton, MouseEvent, TouchEvent};
 pub use footprint::{FootprintCandle, FootprintConfig, FootprintLevel, FootprintRenderer};

@@ -25,6 +25,8 @@ pub struct ChartOptions {
     pub bullish_color: Color,
     pub bearish_color: Color,
     pub unchanged_color: Color,
+    /// Farbe der ersten Indikatorlinie; `None` nimmt die Linienpalette des Themes.
+    pub line_color: Option<Color>,
     pub candle_style: CandleStyle,
     pub show_grid: bool,
     pub show_crosshair: bool,
@@ -45,6 +47,7 @@ impl Default for ChartOptions {
             bullish_color: Color::rgba(153, 246, 228, 1.0),
             bearish_color: Color::rgba(229, 72, 77, 1.0),
             unchanged_color: Color::rgba(169, 180, 199, 1.0), // Doji
+            line_color: None,
             candle_style: CandleStyle::Candlestick,
             show_grid: true,
             show_crosshair: true,
@@ -54,6 +57,58 @@ impl Default for ChartOptions {
             sessions: Vec::new(),
             show_sessions: false,
             show_scrollbar: true,
+        }
+    }
+}
+
+/// Eigene Farben für den Chart. Nur gesetzte Felder ändern etwas; der Rest bleibt,
+/// wie er ist.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct Palette {
+    /// Hintergrund
+    pub bg: Option<Color>,
+    /// Gitterlinien
+    pub grid: Option<Color>,
+    /// Schrift und Achsenbeschriftung
+    pub text: Option<Color>,
+    /// Kerze steigend
+    pub up: Option<Color>,
+    /// Kerze fallend
+    pub down: Option<Color>,
+    /// Erste Indikatorlinie (weitere Linien behalten die Töne des Themes)
+    pub line: Option<Color>,
+    /// Fadenkreuz
+    pub crosshair: Option<Color>,
+    /// Kerze unverändert (Doji)
+    pub unchanged: Option<Color>,
+}
+
+impl ChartOptions {
+    /// Übernimmt die gesetzten Farben der Palette.
+    pub fn apply_palette(&mut self, palette: &Palette) {
+        if let Some(c) = palette.bg {
+            self.background_color = c;
+        }
+        if let Some(c) = palette.grid {
+            self.grid_color = c;
+        }
+        if let Some(c) = palette.text {
+            self.text_color = c;
+        }
+        if let Some(c) = palette.up {
+            self.bullish_color = c;
+        }
+        if let Some(c) = palette.down {
+            self.bearish_color = c;
+        }
+        if let Some(c) = palette.line {
+            self.line_color = Some(c);
+        }
+        if let Some(c) = palette.crosshair {
+            self.crosshair_color = c;
+        }
+        if let Some(c) = palette.unchanged {
+            self.unchanged_color = c;
         }
     }
 }

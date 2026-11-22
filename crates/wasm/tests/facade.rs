@@ -362,3 +362,14 @@ fn the_scrollbar_reports_a_cursor() {
         "außerhalb der Leiste keine Form"
     );
 }
+
+#[wasm_bindgen_test]
+fn a_palette_is_accepted_and_bad_input_rejected() {
+    let mut chart = chart_with_data(20);
+    chart
+        .set_palette(r##"{"bg":"#202124","up":"#2e7d32","line":"#1565c0"}"##)
+        .expect("gültige Palette");
+    assert!(chart.is_dirty());
+    assert!(chart.set_palette(r##"{"bg":"keine Farbe"}"##).is_err());
+    assert!(chart.set_palette(r##"{"unbekannt":"#ffffff"}"##).is_err());
+}

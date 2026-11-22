@@ -39,6 +39,9 @@ const parse = (json, fallback) => {
  * @param {object} [options]
  * @param {string} [options.timeframe='5m']
  * @param {boolean} [options.dark=true]
+ * @param {object} [options.palette]  eigene Farben als Hex (`#rrggbb[aa]`):
+ *   `bg`, `grid`, `text`, `up`, `down`, `line`, `crosshair`, `unchanged`; Fehlendes
+ *   bleibt beim Theme
  * @param {boolean} [options.autoResize=true]  ResizeObserver anhängen
  * @param {boolean} [options.autoInput=true]   Maus/Touch/Tastatur verdrahten
  * @param {boolean} [options.autoRender=true]  Zeichenschleife starten
@@ -47,6 +50,7 @@ export async function createChart(canvas, options = {}) {
   const {
     timeframe = '5m',
     dark = true,
+    palette,
     autoResize = true,
     autoInput = true,
     autoRender = true,
@@ -78,6 +82,7 @@ export async function createChart(canvas, options = {}) {
   chart.attachCanvas(canvas);
   attached = true;
   chart.setTheme(dark);
+  if (palette) chart.setPalette(JSON.stringify(palette));
 
   const teardown = [];
   const on = (target, type, handler, opts) => {
@@ -247,6 +252,8 @@ export async function createChart(canvas, options = {}) {
       fit: () => chart.fitToData(),
       resize: applySize,
       theme: (isDark) => chart.setTheme(isDark),
+      // Eigene Farben zur Laufzeit; stellt `theme()` danach wieder auf Standard.
+      palette: (colors) => chart.setPalette(JSON.stringify(colors)),
       info: () => parse(chart.getViewportInfo(), null),
       crosshair: () => chart.getCrosshairInfo(),
       logScale: (on) => (on === undefined ? chart.isLogScale() : chart.setLogScale(on)),
