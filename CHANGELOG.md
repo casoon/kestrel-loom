@@ -18,7 +18,7 @@ This file was started after 0.1.0; the entries below are drawn from the git hist
 
 ### Changed
 
-- **Pages:** the project site uses the current shared theme (0.16.4).
+- **Pages:** the project site uses the current shared theme (0.17.0).
 - **Dependencies:** kestrel-chartkit is pinned to v0.16.0 (from v0.2.0); the overlay list follows the 105 indicators of that release.
 - **Input:** the mouse wheel scrolls the page; only zoom (⌘/Ctrl or pinch) and horizontal swipes go to the chart. Keys act only while the chart has focus, and live updates keep the visible range.
 - **Rendering:** edges sit on device pixels, the pixel ratio is read again on every resize and screen change, and the crosshair snaps to the candle. Price marks use 1-2-5 steps with the grid on the marks; rising candles are hollow; panes get a title strip instead of separator lines; calmer light and dark palettes.
