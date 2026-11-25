@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use kestrel_loom::core::{
     render_chart, scene_from_indicator_panes, update_indicator_panes, Candle, CandleGenerator,
     ChartState, GeneratorConfig, IndicatorPane, IndicatorPlacement, PriceRange, RenderExtras,
-    TimeRange, Timeframe, Viewport,
+    TimeRange, Timeframe, Viewport, SCROLLBAR_HEIGHT,
 };
 use kestrel_loom::rendering::{cull_candles, DrawStyle};
 use kestrel_loom::tools::{ChartTool, HorizontalLine, ToolManager, ToolNode, TrendLine};
@@ -333,6 +333,37 @@ fn a_frame_with_an_indicator_pane_is_stable() {
         .join("\n");
 
     assert_golden("full_frame_with_rsi_pane", actual);
+}
+
+/// Zeitachse und Zeitleiste liegen unten über dem letzten Pane; seine Linien enden darüber.
+#[test]
+fn the_lowest_pane_ends_above_the_time_axis_and_the_scrollbar() {
+    let mut state = fitted(150);
+    let mut panes = vec![
+        IndicatorPane::new("pane-macd", "macd", HashMap::new(), 0.28)
+            .expect("macd ist im Chartkit-Katalog"),
+    ];
+    update_indicator_panes(&mut panes, state.candles());
+    let extras = RenderExtras {
+        indicator_panes: &panes,
+        ..Default::default()
+    };
+    let lowest = frame(&mut state, &extras)
+        .iter()
+        .filter_map(|cmd| match cmd {
+            RenderCommand::IndicatorLine { points, .. } => {
+                points.iter().map(|(_, y)| *y).reduce(f64::max)
+            }
+            _ => None,
+        })
+        .reduce(f64::max)
+        .expect("der MACD zeichnet Linien");
+    // Zeitachse 20 px (`TIME_AXIS_HEIGHT_PX`), darüber die Zeitleiste.
+    let limit = 400.0 - 20.0 - SCROLLBAR_HEIGHT;
+    assert!(
+        lowest <= limit,
+        "unterster Linienpunkt bei {lowest}, Zeitleiste beginnt bei {limit}"
+    );
 }
 
 #[test]

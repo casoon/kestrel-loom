@@ -970,6 +970,15 @@ fn render_indicator_panes(
     // Price axis column width — oscillator content stops here, scale labels go here.
     let price_axis_w = 64.0;
     let content_w = width - price_axis_w;
+    // Zeitachse und Zeitleiste liegen unten über dem letzten Pane; seine Zeichenfläche endet
+    // darüber, sonst verdecken sie die untersten Werte.
+    let plot_limit = height
+        - TIME_AXIS_HEIGHT_PX
+        - if state.options.show_scrollbar {
+            SCROLLBAR_HEIGHT
+        } else {
+            0.0
+        };
 
     for pane in indicator_panes
         .iter()
@@ -982,7 +991,9 @@ fn render_indicator_panes(
         renderer.fill_rect(content_w, top, price_axis_w, pane_h, bg);
         // Der Titel steht über dem Pane; darunter beginnt die Zeichenfläche.
         let plot_top = top + PANE_TITLE_BAND_PX;
-        let plot_h = (pane_h - PANE_TITLE_BAND_PX).max(24.0);
+        let plot_h = (pane_h - PANE_TITLE_BAND_PX)
+            .min(plot_limit - plot_top)
+            .max(24.0);
 
         // Alle Linien des Indikators, auf eine gemeinsame Skala gebracht.
         let visible_time = vp.time_range();
