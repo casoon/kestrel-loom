@@ -298,6 +298,11 @@ export async function createChart(canvas, options = {}) {
       height: (paneId, fraction) => chart.setPaneHeightFraction(paneId, fraction),
       layout: () => parse(chart.getPaneLayout(), []),
       /**
+       * Linien aller Indikatoren mit der Farbe, in der sie gerade gezeichnet werden —
+       * für eine Legende außerhalb des Charts. Nach `view.theme()` neu abfragen.
+       */
+      lines: () => parse(chart.getIndicatorLines(), []),
+      /**
        * Zeichnet die Artefakte der aktiven Indikatoren mit — Zonen, Pivots,
        * Volumenprofile. Sie fallen bei der Berechnung ohnehin an.
        */

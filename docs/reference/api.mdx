@@ -66,9 +66,11 @@ resetPriceScale()  resetTimeScale()  timeToX(time)  xToTime(x)`}
   lang="js"
   name="indicators"
   signature={`available()  add(name, params?) → paneId  remove(paneId)
-height(paneId, fraction)  layout()  artifacts(on)`}
+height(paneId, fraction)  layout()  lines()  artifacts(on)`}
 >
-  Names and default parameters come from kestrel-chartkit's catalogue.
+  Names and default parameters come from kestrel-chartkit's catalogue. `lines()` lists every
+  indicator with its lines and the colour each is drawn in under the current theme, for a legend
+  outside the chart.
 </ApiEntry>
 
 <ApiEntry

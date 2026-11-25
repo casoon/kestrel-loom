@@ -45,6 +45,17 @@ impl IndicatorPane {
         self.placement() == IndicatorPlacement::Pane
     }
 
+    /// Die Linien mit Werten und die Farbe, in der sie gezeichnet werden — gezählt wie beim
+    /// Zeichnen, damit eine Legende außerhalb des Charts dieselben Farben nennt.
+    pub fn line_colors(&self, state: &ChartState) -> Vec<(&'static str, Color)> {
+        let dark = is_dark(state);
+        self.series
+            .lines()
+            .enumerate()
+            .map(|(index, line)| (line.label, line_color(index, dark)))
+            .collect()
+    }
+
     /// Legt ein Pane für einen Indikator aus dem Chartkit-Katalog an.
     pub fn new(
         pane_id: impl Into<String>,

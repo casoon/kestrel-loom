@@ -238,6 +238,37 @@ fn an_overlay_has_no_pane_and_costs_no_height() {
 }
 
 #[wasm_bindgen_test]
+fn every_indicator_line_reports_the_colour_it_is_drawn_in() {
+    let mut chart = chart_with_data(80);
+    chart.add_indicator_pane("bb", "{}").unwrap();
+    chart.add_indicator_pane("macd", "{}").unwrap();
+    let list: serde_json::Value = serde_json::from_str(&chart.get_indicator_lines()).unwrap();
+    let list = list.as_array().unwrap();
+    assert_eq!(list.len(), 2);
+    assert_eq!(list[0]["placement"], "overlay");
+    assert_eq!(list[1]["placement"], "pane");
+    for indicator in list {
+        let lines = indicator["lines"].as_array().unwrap();
+        assert!(
+            lines.len() > 1,
+            "{} hat mehrere Linien",
+            indicator["indicatorId"]
+        );
+        let colours: std::collections::HashSet<_> =
+            lines.iter().map(|l| l["color"].as_str().unwrap()).collect();
+        assert_eq!(colours.len(), lines.len().min(4), "Linien unterscheidbar");
+    }
+    chart.set_theme(false);
+    let light = chart.get_indicator_lines();
+    chart.set_theme(true);
+    assert_ne!(
+        chart.get_indicator_lines(),
+        light,
+        "das Theme wechselt die Linienfarben"
+    );
+}
+
+#[wasm_bindgen_test]
 fn volume_is_off_until_the_caller_asks_for_it() {
     let mut chart = chart_with_data(60);
     assert!(!chart.get_show_volume());

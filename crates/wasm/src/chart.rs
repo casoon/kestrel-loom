@@ -1209,6 +1209,34 @@ impl WasmChart {
         serde_json::to_string(&self.pane_layout_json()).unwrap_or_else(|_| "[]".to_string())
     }
 
+    /// Alle Indikatoren mit ihren Linien und deren Farbe im aktuellen Theme, als JSON:
+    /// `[{ id, indicatorId, placement: "overlay" | "pane", lines: [{ label, color }] }]`.
+    ///
+    /// Für Legenden außerhalb des Charts. Rechnet zuvor die Kerzen ein, die noch kein Frame
+    /// gesehen hat; eine Linie erscheint, sobald sie einen Wert hat.
+    #[wasm_bindgen(js_name = getIndicatorLines)]
+    pub fn get_indicator_lines(&mut self) -> String {
+        update_indicator_panes(&mut self.indicator_panes, self.state.candles());
+        let list: Vec<serde_json::Value> = self
+            .indicator_panes
+            .iter()
+            .map(|pane| {
+                let lines: Vec<serde_json::Value> = pane
+                    .line_colors(&self.state)
+                    .into_iter()
+                    .map(|(label, color)| serde_json::json!({ "label": label, "color": color.to_css() }))
+                    .collect();
+                serde_json::json!({
+                    "id": pane.pane_id,
+                    "indicatorId": pane.indicator_id,
+                    "placement": if pane.has_own_pane() { "pane" } else { "overlay" },
+                    "lines": lines,
+                })
+            })
+            .collect();
+        serde_json::to_string(&list).unwrap_or_else(|_| "[]".to_string())
+    }
+
     fn normalize_indicator_panes(&mut self) {
         if self.indicator_panes.is_empty() {
             return;
